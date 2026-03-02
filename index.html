@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MotoSwap Liquidity Locker — OP_NET</title>
+  <meta name="description" content="Trustless LP token locker for MotoSwap on OP_NET." />
+  <meta name="theme-color" content="#050A14" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    html,body,#root{margin:0;padding:0;background:#050A14;height:100%;overflow:hidden;}
+    *{box-sizing:border-box;}
+    ::-webkit-scrollbar{width:3px;}
+    ::-webkit-scrollbar-track{background:#0B1220;}
+    ::-webkit-scrollbar-thumb{background:#1A2E4A;border-radius:2px;}
+    input{color-scheme:dark;}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+const { useState, useEffect } = React;
+
+const C = {
+  bg:"#050A14",surf:"#0B1220",surf2:"#0F1A2E",
+  border:"#1A2E4A",border2:"#0D2040",
+  cyan:"#00D4FF",purple:"#7B2FFF",green:"#00FF94",
+  yellow:"#FFB800",red:"#FF3B5C",
+  text:"#C8E0FF",muted:"#3A5A7A",faint:"#162030",
+};
+
+const BLOCK = 840512;
+const DEMO_ADDR = "bc1pzk8f2q...r5s6t";
+const DEMO_NETWORK = "OP_NET TESTNET";
+const DEMO_BALANCE = "0.004821 tBTC";
+
+const BASE_LOCKS = [
+  {id:1,token:"MOTO-PILL",owner:"bc1pzk8f2q9x4m7n3r5t6w0y1u8i9o2p3q4r5s6t",amt:"1,000,000",raw:1000000,unlockBlock:0,perm:true,done:false,ext:false,label:"MOTO-PILL Launch Lock — Permanent",lockedAt:838200,color:C.cyan},
+  {id:2,token:"MOTO-PILL",owner:"bc1pab3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s",amt:"500,000",raw:500000,unlockBlock:866792,perm:false,done:false,ext:true,label:"Team Vesting — 6 Month Lock",lockedAt:839100,color:C.purple},
+  {id:3,token:"MOTO-BTC",owner:"bc1px1y2z3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8",amt:"250,000",raw:250000,unlockBlock:854992,perm:false,done:false,ext:false,label:"Partnership LP — 3 Month",lockedAt:839500,color:C.green},
+  {id:4,token:"PILL-BTC",owner:"bc1pq9w8e7r6t5y4u3i2o1p0a9s8d7f6g5h4j3k2",amt:"100,000",raw:100000,unlockBlock:836000,perm:false,done:true,ext:false,label:"Seed Round Lock",lockedAt:810000,color:C.yellow},
+];
+
+const PAIRS = [
+  {id:"moto-pill",label:"MOTO-PILL",color:C.cyan},
+  {id:"moto-btc",label:"MOTO-BTC",color:C.purple},
+  {id:"pill-btc",label:"PILL-BTC",color:C.green},
+];
+
+const shortAddr = a => a ? a.slice(0,10)+"…"+a.slice(-6) : "—";
+const blocksToTime = b => {
+  if(!b) return "PERMANENT";
+  const m=b*10;
+  if(m<60) return `~${m}m`;
+  if(m<1440) return `~${Math.round(m/60)}h`;
+  if(m<10080) return `~${Math.round(m/1440)}d`;
+  if(m<43200) return `~${Math.round(m/10080)}wk`;
+  return `~${Math.round(m/43800)}mo`;
+};
+
+const css = `
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@400;600;700;800&display=swap');
+  @keyframes ticker{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes logoGlow{0%,100%{box-shadow:0 0 24px #00D4FF28,0 0 48px #7B2FFF14}50%{box-shadow:0 0 40px #00D4FF44,0 0 80px #7B2FFF28}}
+  @keyframes popIn{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes slideIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+  input::placeholder{color:#3A5A7A !important;}
+  input:focus{border-color:#00D4FF !important;outline:none;}
+  button:hover{filter:brightness(1.12);}
+`;
+
+/* ── GRID BG ── */
+const GridBg = () => (
+  <div style={{position:"fixed",inset:0,pointerEvents:"none",zIndex:0,
+    backgroundImage:`linear-gradient(${C.border2} 1px,transparent 1px),linear-gradient(90deg,${C.border2} 1px,transparent 1px)`,
+    backgroundSize:"44px 44px",
+    maskImage:"radial-gradient(ellipse 90% 90% at 50% 40%,black 30%,transparent 100%)"}}/>
+);
+const Scanlines = () => (
+  <div style={{position:"fixed",inset:0,pointerEvents:"none",zIndex:0,
+    backgroundImage:"repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,212,255,0.012) 2px,rgba(0,212,255,0.012) 4px)"}}/>
+);
+
+/* ── TICKER ── */
+function Ticker() {
+  const items=["⬡ BLOCK #840,512","▸ OP_NET TESTNET","◆ 1.75M LP SECURED","▸ REENTRANCY GUARD","⬡ P2OP DEPLOYED","◆ DEPLOYABLEOP_20","▸ MOTO-PILL 96% LOCKED","⬡ OPSCAN INDEXED","◆ v3.0 TESTNET","▸ tBTC GAS","⬡ SMART CONTRACTS ON BITCOIN"];
+  const all=[...items,...items];
+  return (
+    <div style={{overflow:"hidden",height:26,display:"flex",alignItems:"center",borderBottom:`1px solid ${C.border}`,background:C.bg,position:"relative",zIndex:9}}>
+      <div style={{display:"flex",gap:44,animation:"ticker 32s linear infinite",whiteSpace:"nowrap",fontSize:9,fontFamily:"'Share Tech Mono',monospace",color:C.muted,letterSpacing:"0.09em"}}>
+        {all.map((t,i)=><span key={i}><span style={{color:C.faint,marginRight:8}}>◈</span>{t}</span>)}
+      </div>
+    </div>
+  );
+}
+
+/* ── WALLET GATE ── */
+function WalletGate({onConnect}) {
+  const [phase,setPhase]=useState("idle");
+  const [dot,setDot]=useState(0);
+  useEffect(()=>{
+    if(phase!=="awaiting") return;
+    const t=setInterval(()=>setDot(d=>(d+1)%4),380);
+    const done=setTimeout(()=>{clearInterval(t);setPhase("approved");},2600);
+    return ()=>{clearInterval(t);clearTimeout(done);};
+  },[phase]);
+  useEffect(()=>{
+    if(phase==="approved"){const t=setTimeout(onConnect,700);return ()=>clearTimeout(t);}
+  },[phase]);
+  const dots=".".repeat(dot);
+  return (
+    <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",position:"relative",zIndex:1,padding:32,minHeight:0}}>
+      <div style={{position:"absolute",width:500,height:500,borderRadius:"50%",background:`radial-gradient(circle,${C.cyan}14,transparent 70%)`,filter:"blur(50px)",pointerEvents:"none",top:"50%",left:"50%",transform:"translate(-50%,-50%)"}}/>
+      <div style={{position:"absolute",width:300,height:300,borderRadius:"50%",background:`radial-gradient(circle,${C.purple}10,transparent 70%)`,filter:"blur(40px)",pointerEvents:"none",top:"40%",left:"60%",transform:"translate(-50%,-50%)"}}/>
+      <div style={{position:"relative",textAlign:"center",maxWidth:460,width:"100%"}}>
+        <div style={{marginBottom:28}}>
+          <div style={{width:72,height:72,borderRadius:16,margin:"0 auto 16px",background:`linear-gradient(135deg,${C.cyan}28,${C.purple}28)`,border:`1.5px solid ${C.cyan}55`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,animation:"logoGlow 3s ease-in-out infinite"}}>⬡</div>
+          <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:800,fontSize:22,color:C.text,letterSpacing:"0.08em",marginBottom:4}}>MOTOSWAP LOCKER</div>
+          <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:C.muted,letterSpacing:"0.2em"}}>LP LOCK PROTOCOL · OP_NET v3.0 TESTNET</div>
+        </div>
+        <div style={{display:"flex",marginBottom:28,border:`1px solid ${C.border}`,borderRadius:8,overflow:"hidden",background:C.surf}}>
+          {[["1.75M","LP SECURED"],[4,"LOCKS"],[2,"PERMANENT"],[3,"PAIRS"]].map(([v,l],i)=>(
+            <div key={i} style={{flex:1,padding:"12px 0",borderRight:i<3?`1px solid ${C.border}`:"none",textAlign:"center"}}>
+              <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:18,color:C.cyan}}>{v}</div>
+              <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:7,color:C.muted,letterSpacing:"0.1em",marginTop:2}}>{l}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{background:C.surf,border:`1px solid ${C.border}`,borderRadius:12,padding:28}}>
+          {phase==="idle" && (<>
+            <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:9,color:C.muted,letterSpacing:"0.18em",marginBottom:18}}>CONNECT WALLET TO CONTINUE</div>
+            <button onClick={()=>setPhase("awaiting")} style={{width:"100%",padding:"15px 0",cursor:"pointer",background:`linear-gradient(135deg,${C.cyan}1a,${C.purple}1a)`,border:`1.5px solid ${C.cyan}`,borderRadius:8,fontFamily:"'Share Tech Mono',monospace",fontSize:12,color:C.cyan,letterSpacing:"0.18em",fontWeight:"bold",boxShadow:`0 0 24px ${C.cyan}28`,display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+              <span style={{fontSize:16}}>⬡</span> CONNECT OP_WALLET
+            </button>
+            <div style={{marginTop:16,display:"flex",flexDirection:"column",gap:5,textAlign:"left"}}>
+              {["TAPROOT ADDRESS (bc1p…) REQUIRED","tBTC FOR GAS · PILL FOR LP TOKENS","NON-CUSTODIAL · YOUR KEYS YOUR LOCKS","OPSCAN INDEXED · FULLY TRANSPARENT"].map((t,i)=>(
+                <div key={i} style={{fontFamily:"'Share Tech Mono',monospace",fontSize:8,color:C.muted,letterSpacing:"0.08em",display:"flex",gap:8,alignItems:"center"}}><span style={{color:C.faint}}>▸</span>{t}</div>
+              ))}
+            </div>
+          </>)}
+          {phase==="awaiting" && (
+            <div style={{textAlign:"center",padding:"8px 0"}}>
+              <div style={{width:48,height:48,borderRadius:"50%",border:`2px solid ${C.cyan}`,borderTopColor:"transparent",animation:"spin 0.8s linear infinite",margin:"0 auto 16px"}}/>
+              <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:11,color:C.cyan,letterSpacing:"0.14em",marginBottom:8}}>AWAITING APPROVAL{dots}</div>
+              <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:9,color:C.muted,lineHeight:1.8}}>Check your OP_WALLET extension<br/>and approve the connection request</div>
+            </div>
+          )}
+          {phase==="approved" && (
+            <div style={{textAlign:"center",padding:"8px 0"}}>
+              <div style={{fontSize:36,marginBottom:10,animation:"popIn 0.3s ease",color:C.green}}>✓</div>
+              <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:12,color:C.green,letterSpacing:"0.14em"}}>WALLET CONNECTED</div>
+              <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:9,color:C.muted,marginTop:6}}>{DEMO_ADDR}</div>
+            </div>
+          )}
+        </div>
+        <div style={{marginTop:14,fontFamily:"'Share Tech Mono',monospace",fontSize:8,color:C.faint,letterSpacing:"0.1em"}}>
+          DON'T HAVE OP_WALLET? <span style={{color:C.muted,borderBottom:`1px solid ${C.muted}`,cursor:"pointer"}}>INSTALL EXTENSION →</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── LOCK CARD ── */
+function LockCard({lock,selected,onClick}) {
+  const left=lock.unlockBlock>0?lock.unlockBlock-BLOCK:0;
+  const pct=lock.perm?100:lock.done?100:Math.min(100,((BLOCK-lock.lockedAt)/(lock.unlockBlock-lock.lockedAt))*100);
+  const sc=lock.perm?C.cyan:lock.done?C.muted:left<=0?C.green:C.yellow;
+  const sl=lock.perm?"PERMANENT":lock.done?"RELEASED":left<=0?"UNLOCKABLE":"LOCKED";
+  return (
+    <div onClick={onClick} style={{background:selected?C.surf2:C.surf,border:`1px solid ${selected?lock.color:C.border}`,borderRadius:8,padding:"13px 15px",cursor:"pointer",transition:"border-color 0.15s",position:"relative",overflow:"hidden",boxShadow:selected?`0 0 18px ${lock.color}1a`:"none"}}>
+      {selected&&<div style={{position:"absolute",inset:0,background:`radial-gradient(ellipse at top left,${lock.color}0e,transparent 60%)`,pointerEvents:"none"}}/>}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:7}}>
+        <div>
+          <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:8,color:C.muted,letterSpacing:"0.1em",marginBottom:2}}>LOCK #{String(lock.id).padStart(4,"0")}</div>
+          <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:13,color:lock.color,letterSpacing:"0.06em"}}>{lock.token}</div>
+        </div>
+        <div style={{background:`${sc}18`,border:`1px solid ${sc}40`,borderRadius:4,padding:"2px 7px",fontFamily:"'Share Tech Mono',monospace",fontSize:7,color:sc,letterSpacing:"0.1em",fontWeight:"bold"}}>{sl}</div>
+      </div>
+      <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:19,color:C.text,marginBottom:5}}>
+        {lock.amt} <span style={{fontSize:9,color:C.muted,fontFamily:"'Share Tech Mono',monospace"}}>LP</span>
+      </div>
+      <div style={{height:2,background:C.faint,borderRadius:1,overflow:"hidden",marginBottom:7}}>
+        <div style={{width:`${pct}%`,height:"100%",background:lock.perm?`linear-gradient(90deg,${C.cyan},${C.purple})`:lock.done?"#333":`linear-gradient(90deg,${lock.color}88,${lock.color})`,boxShadow:`0 0 6px ${lock.color}55`}}/>
+      </div>
+      <div style={{display:"flex",justifyContent:"space-between"}}>
+        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:8,color:C.muted}}>{shortAddr(lock.owner)}</div>
+        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:8,color:lock.perm?C.cyan:C.muted}}>{lock.perm?"∞ FOREVER":lock.done?"✓ DONE":left>0?`${left.toLocaleString()} BLK`:"READY"}</div>
+      </div>
+      {lock.ext&&<div style={{position:"absolute",top:0,right:0,background:`${C.green}18`,borderLeft:`1px solid ${C.green}35`,borderBottom:`1px solid ${C.green}35`,borderRadius:"0 8px 0 4px",padding:"2px 6px",fontFamily:"'Share Tech Mono',monospace",fontSize:7,color:C.green}}>↑ EXT</div>}
+    </div>
+  );
+}
+
+/* ── DETAIL PANEL ── */
+function DetailPanel({lock,onClose}) {
+  if(!lock) return (
+    <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",color:C.faint,fontFamily:"'Share Tech Mono',monospace",gap:10}}>
+      <div style={{fontSize:34,color:`${C.cyan}30`}}>⬡</div>
+      <div style={{fontSize:10,letterSpacing:"0.12em"}}>SELECT A LOCK TO INSPECT</div>
+    </div>
+  );
+  const left=lock.unlockBlock>0?lock.unlockBlock-BLOCK:0;
+  const rows=[
+    {k:"LOCK ID",v:`#${String(lock.id).padStart(4,"0")}`},
+    {k:"LP PAIR",v:lock.token,c:lock.color},
+    {k:"AMOUNT",v:`${lock.amt} LP`},
+    {k:"OWNER",v:shortAddr(lock.owner),mono:true},
+    {k:"TYPE",v:lock.perm?"PERMANENT BURN":"TIMELOCK",c:lock.perm?C.cyan:C.yellow},
+    {k:"LOCKED AT",v:`BLK #${lock.lockedAt.toLocaleString()}`},
+    {k:"UNLOCK BLK",v:lock.perm?"NEVER (∞)":`#${lock.unlockBlock.toLocaleString()}`},
+    {k:"BLOCKS LEFT",v:lock.perm?"∞":lock.done?"0 — RELEASED":left>0?left.toLocaleString():"0 — READY"},
+    {k:"TIME EST.",v:blocksToTime(Math.max(0,left))},
+    {k:"EXTENDED",v:lock.ext?"YES":"NO",c:lock.ext?C.green:undefined},
+    {k:"RELEASED",v:lock.done?"YES":"NO"},
+    {k:"LABEL",v:`"${lock.label}"`,it:true},
+  ];
+  return (
+    <div style={{flex:1,background:C.surf,border:`1px solid ${C.border}`,borderRadius:8,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+      <div style={{padding:"11px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:C.surf2}}>
+        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:9,color:C.cyan,letterSpacing:"0.18em"}}>LOCK INSPECTOR</div>
+        <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",color:C.muted,fontSize:13,padding:0}}>✕</button>
+      </div>
+      <div style={{padding:"18px 16px 14px",borderBottom:`1px solid ${C.border2}`,background:`radial-gradient(ellipse at center top,${lock.color}15,transparent 60%)`}}>
+        <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:800,fontSize:26,color:lock.color,letterSpacing:"0.06em",textShadow:`0 0 22px ${lock.color}44`}}>{lock.token}</div>
+        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:8,color:C.muted,marginTop:3,letterSpacing:"0.12em"}}>MOTOSWAP LP PAIR · OP_NET TESTNET</div>
+      </div>
+      <div style={{flex:1,overflowY:"auto"}}>
+        {rows.map(({k,v,c,mono,it})=>(
+          <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"6px 16px",borderBottom:`1px solid ${C.border2}`,gap:10}}>
+            <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:8,color:C.muted,letterSpacing:"0.1em",minWidth:84,flexShrink:0}}>{k}</div>
+            <div style={{fontFamily:mono?"'Share Tech Mono',monospace":"'Exo 2',sans-serif",fontWeight:mono?400:600,fontSize:mono?8:11,color:c||C.text,textAlign:"right",wordBreak:"break-all",fontStyle:it?"italic":"normal"}}>{v}</div>
+          </div>
+        ))}
+      </div>
+      {!lock.perm&&!lock.done&&(
+        <div style={{padding:12,borderTop:`1px solid ${C.border}`,display:"flex",gap:8}}>
+          {left<=0
+            ?<button style={{flex:1,padding:"10px 0",cursor:"pointer",background:`${C.green}18`,border:`1px solid ${C.green}`,borderRadius:6,fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:C.green,letterSpacing:"0.1em"}}>◈ UNLOCK NOW</button>
+            :<button style={{flex:1,padding:"10px 0",cursor:"default",background:C.surf2,border:`1px solid ${C.border}`,borderRadius:6,fontFamily:"'Share Tech Mono',monospace",fontSize:9,color:C.muted}}>◷ {left.toLocaleString()} BLOCKS REMAINING</button>
+          }
+          <button style={{padding:"10px 12px",cursor:"pointer",background:`${C.purple}18`,border:`1px solid ${C.purple}55`,borderRadius:6,fontFamily:"'Share Tech Mono',monospace",fontSize:9,color:C.purple}}>↑ EXTEND</button>
+        </div>
+      )}
+      {lock.perm&&<div style={{padding:"10px 16px",borderTop:`1px solid ${C.border}`,fontFamily:"'Share Tech Mono',monospace",fontSize:8,color:C.cyan,letterSpacing:"0.1em",textAlign:"center",background:`${C.cyan}08`}}>🔐 PERMANENTLY BURNED — LIQUIDITY IMMUTABLY LOCKED</div>}
+    </div>
+  );
+}
+
+/* ── NEW LOCK MODAL ── */
+function NewLockModal({onClose,onAdd}) {
+  const [mode,setMode]=useState("timed");
+  const [pair,setPair]=useState(PAIRS[0]);
+  const [amt,setAmt]=useState("");
+  const [dur,setDur]=useState("26280");
+  const [label,setLabel]=useState("");
+  const [phase,setPhase]=useState("form");
+  const presets=[{l:"1 MO",b:"4380"},{l:"3 MO",b:"13140"},{l:"6 MO",b:"26280"},{l:"1 YR",b:"52560"}];
+  function submit(){if(!amt)return;setPhase("signing");setTimeout(()=>setPhase("done"),2200);}
+  if(phase==="signing") return (
+    <div style={{position:"fixed",inset:0,background:"#000000bb",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}}>
+      <div style={{background:C.surf,border:`1px solid ${C.purple}`,borderRadius:12,padding:36,textAlign:"center"}}>
+        <div style={{width:44,height:44,borderRadius:"50%",border:`2px solid ${C.purple}`,borderTopColor:"transparent",animation:"spin 0.8s linear infinite",margin:"0 auto 16px"}}/>
+        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:11,color:C.purple,letterSpacing:"0.14em"}}>SIGNING TRANSACTION</div>
+      </div>
+    </div>
+  );
+  if(phase==="done") return (
+    <div style={{position:"fixed",inset:0,background:"#000000bb",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}}>
+      <div style={{background:C.surf,border:`1px solid ${C.cyan}`,borderRadius:12,padding:36,textAlign:"center",maxWidth:360}}>
+        <div style={{fontSize:38,color:C.cyan,marginBottom:12,animation:"popIn 0.3s ease"}}>⬡</div>
+        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:13,color:C.cyan,letterSpacing:"0.14em",marginBottom:8}}>LOCK CONFIRMED</div>
+        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:8,color:C.muted,marginBottom:18,lineHeight:2}}>Transaction broadcast to OP_NET.<br/>Lock ID assigned at confirmation.</div>
+        <div style={{background:C.surf2,border:`1px solid ${C.border}`,borderRadius:6,padding:12,marginBottom:18,textAlign:"left",fontFamily:"'Share Tech Mono',monospace",fontSize:8,color:C.text,lineHeight:2.2}}>
+          PAIR:   {pair.label}<br/>AMT:    {amt} LP<br/>
+          TYPE:   {mode==="permanent"?"PERMANENT BURN":`TIMED — ${blocksToTime(parseInt(dur)||0)}`}<br/>
+          LABEL:  {label||"—"}
+        </div>
+        <button onClick={()=>{onAdd({pair,amt,mode,dur,label});onClose();}} style={{width:"100%",padding:"10px 0",cursor:"pointer",background:`linear-gradient(135deg,${C.cyan}22,${C.purple}22)`,border:`1px solid ${C.cyan}`,borderRadius:6,fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:C.cyan,letterSpacing:"0.14em"}}>CLOSE</button>
+      </div>
+    </div>
+  );
+  return (
+    <div style={{position:"fixed",inset:0,background:"#000000bb",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}}>
+      <div style={{background:C.surf,border:`1px solid ${C.border}`,borderRadius:12,width:400,maxWidth:"95vw",overflow:"hidden"}}>
+        <div style={{padding:"12px 18px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",background:C.surf2}}>
+          <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:9,color:C.cyan,letterSpacing:"0.2em"}}>NEW LOCK</div>
+          <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",color:C.muted,fontSize:13,padding:0}}>✕</button>
+        </div>
+        <div style={{padding:18,display:"flex",flexDirection:"column",gap:14}}>
+          <div>
+            <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:7,color:C.muted,letterSpacing:"0.16em",marginBottom:6}}>LOCK TYPE</div>
+            <div style={{display:"flex",gap:7}}>
+              {[["timed","⏱ TIMELOCK"],["permanent","🔥 PERMANENT"]].map(([m,l])=>(
+                <button key={m} onClick={()=>setMode(m)} style={{flex:1,padding:"8px 0",cursor:"pointer",background:mode===m?(m==="permanent"?`${C.red}18`:`${C.cyan}18`):"transparent",border:`1px solid ${mode===m?(m==="permanent"?C.red:C.cyan):C.border}`,borderRadius:6,fontFamily:"'Share Tech Mono',monospace",fontSize:9,color:mode===m?(m==="permanent"?C.red:C.cyan):C.muted}}>{l}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:7,color:C.muted,letterSpacing:"0.16em",marginBottom:6}}>LP PAIR</div>
+            <div style={{display:"flex",gap:6}}>
+              {PAIRS.map(p=>(
+                <button key={p.id} onClick={()=>setPair(p)} style={{flex:1,padding:"7px 0",cursor:"pointer",background:pair.id===p.id?`${p.color}18`:"transparent",border:`1px solid ${pair.id===p.id?p.color:C.border}`,borderRadius:6,fontFamily:"'Share Tech Mono',monospace",fontSize:9,color:pair.id===p.id?p.color:C.muted}}>{p.label}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:7,color:C.muted,letterSpacing:"0.16em",marginBottom:5}}>AMOUNT (LP TOKENS)</div>
+            <input type="number" value={amt} onChange={e=>setAmt(e.target.value)} placeholder="0.00" style={{width:"100%",background:C.surf2,border:`1px solid ${C.border}`,borderRadius:6,padding:"10px 12px",fontFamily:"'Share Tech Mono',monospace",fontSize:13,color:C.text}}/>
+          </div>
+          {mode==="timed"&&(
+            <div>
+              <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:7,color:C.muted,letterSpacing:"0.16em",marginBottom:5}}>DURATION — {blocksToTime(parseInt(dur)||0)}</div>
+              <div style={{display:"flex",gap:5,marginBottom:7}}>
+                {presets.map(p=>(
+                  <button key={p.l} onClick={()=>setDur(p.b)} style={{flex:1,padding:"5px 0",cursor:"pointer",background:dur===p.b?`${C.purple}22`:"transparent",border:`1px solid ${dur===p.b?C.purple:C.border}`,borderRadius:4,fontFamily:"'Share Tech Mono',monospace",fontSize:8,color:dur===p.b?C.purple:C.muted}}>{p.l}</button>
+                ))}
+              </div>
+              <input type="number" value={dur} onChange={e=>setDur(e.target.value)} style={{width:"100%",background:C.surf2,border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 12px",fontFamily:"'Share Tech Mono',monospace",fontSize:11,color:C.muted}}/>
+            </div>
+          )}
+          <div>
+            <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:7,color:C.muted,letterSpacing:"0.16em",marginBottom:5}}>LABEL (MAX 64 CHARS)</div>
+            <input type="text" maxLength={64} value={label} onChange={e=>setLabel(e.target.value)} placeholder="e.g. Team Vesting Lock" style={{width:"100%",background:C.surf2,border:`1px solid ${C.border}`,borderRadius:6,padding:"9px 12px",fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:C.text}}/>
+          </div>
+          {mode==="permanent"&&<div style={{background:`${C.red}10`,border:`1px solid ${C.red}40`,borderRadius:6,padding:"9px 12px",fontFamily:"'Share Tech Mono',monospace",fontSize:8,color:C.red,lineHeight:1.8}}>⚠ IRREVERSIBLE — No release path. Cannot be undone.</div>}
+          <button onClick={submit} style={{padding:"12px 0",cursor:amt?"pointer":"default",background:amt?(mode==="permanent"?`linear-gradient(135deg,${C.red}28,${C.red}10)`:`linear-gradient(135deg,${C.cyan}22,${C.purple}22)`):"transparent",border:`1px solid ${amt?(mode==="permanent"?C.red:C.cyan):C.border}`,borderRadius:8,fontFamily:"'Share Tech Mono',monospace",fontSize:11,color:amt?(mode==="permanent"?C.red:C.cyan):C.muted,letterSpacing:"0.16em",fontWeight:"bold"}}>
+            {mode==="permanent"?"🔥 SIGN & LOCK PERMANENTLY":"◈ SIGN & LOCK TOKENS"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── WALLET BADGE ── */
+function WalletBadge({onDisconnect}) {
+  const [open,setOpen]=useState(false);
+  return (
+    <div style={{position:"relative"}}>
+      <button onClick={()=>setOpen(p=>!p)} style={{display:"flex",alignItems:"center",gap:7,background:`${C.green}14`,border:`1px solid ${C.green}40`,borderRadius:6,padding:"6px 13px",cursor:"pointer",fontFamily:"'Share Tech Mono',monospace",fontSize:9,color:C.green}}>
+        <span style={{animation:"pulse 2s infinite",fontSize:7}}>●</span>{DEMO_ADDR}
+      </button>
+      {open&&(
+        <div style={{position:"absolute",top:"calc(100% + 6px)",right:0,background:C.surf,border:`1px solid ${C.border}`,borderRadius:8,padding:14,minWidth:210,zIndex:50,boxShadow:"0 8px 32px #000a"}}>
+          <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:7,color:C.muted,letterSpacing:"0.16em",marginBottom:10}}>OP_WALLET</div>
+          {[["ADDRESS",DEMO_ADDR],["NETWORK",DEMO_NETWORK],["BALANCE",DEMO_BALANCE]].map(([k,v])=>(
+            <div key={k} style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+              <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:7,color:C.muted}}>{k}</div>
+              <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:8,color:C.text}}>{v}</div>
+            </div>
+          ))}
+          <button onClick={()=>{onDisconnect();setOpen(false);}} style={{width:"100%",marginTop:10,padding:"7px 0",cursor:"pointer",background:"transparent",border:`1px solid ${C.border}`,borderRadius:4,fontFamily:"'Share Tech Mono',monospace",fontSize:8,color:C.muted}}>DISCONNECT</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── MAIN APP ── */
+function App() {
+  const [connected,setConnected]=useState(false);
+  const [locks,setLocks]=useState(BASE_LOCKS);
+  const [selected,setSelected]=useState(BASE_LOCKS[0]);
+  const [filter,setFilter]=useState("all");
+  const [showNew,setShowNew]=useState(false);
+  const [blockNum,setBlockNum]=useState(BLOCK);
+  useEffect(()=>{
+    if(!connected) return;
+    const t=setInterval(()=>setBlockNum(b=>b+1),8000);
+    return ()=>clearInterval(t);
+  },[connected]);
+  const filtered=locks.filter(l=>filter==="all"?true:filter==="permanent"?l.perm:filter==="timed"?(!l.perm&&!l.done):l.done);
+  const totalLP=locks.filter(l=>!l.done).reduce((a,l)=>a+l.raw,0);
+  function handleAdd({pair,amt,mode,dur,label}) {
+    const n={id:locks.length+1,token:pair.label,owner:DEMO_ADDR,amt:parseInt(amt).toLocaleString(),raw:parseInt(amt)||0,unlockBlock:mode==="permanent"?0:blockNum+parseInt(dur),perm:mode==="permanent",done:false,ext:false,label:label||`${pair.label} Lock`,lockedAt:blockNum,color:pair.color};
+    setLocks(prev=>[n,...prev]);setSelected(n);setFilter("all");
+  }
+  return (
+    <div style={{background:C.bg,height:"100vh",display:"flex",flexDirection:"column",position:"relative",fontFamily:"'Share Tech Mono',monospace",overflow:"hidden"}}>
+      <style>{css}</style>
+      <GridBg/><Scanlines/>
+      {/* NAV */}
+      <div style={{position:"relative",zIndex:10,padding:"0 20px",height:52,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",background:`${C.bg}f0`,backdropFilter:"blur(10px)",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:14}}>
+          <div style={{display:"flex",alignItems:"center",gap:9}}>
+            <div style={{width:28,height:28,borderRadius:7,background:`linear-gradient(135deg,${C.cyan}38,${C.purple}38)`,border:`1.5px solid ${C.cyan}55`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}}>⬡</div>
+            <div>
+              <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:800,fontSize:13,color:C.text,letterSpacing:"0.07em",lineHeight:1.1}}>MOTOSWAP LOCKER</div>
+              <div style={{fontSize:7,color:C.muted,letterSpacing:"0.14em"}}>LP LOCK PROTOCOL · OP_NET</div>
+            </div>
+          </div>
+          <div style={{width:1,height:24,background:C.border}}/>
+          <div style={{fontSize:8,color:C.muted,letterSpacing:"0.1em"}}>v3.0 · TESTNET</div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{fontSize:8,color:C.muted,display:"flex",alignItems:"center",gap:5}}>
+            <span style={{animation:"pulse 2s infinite",color:C.green,fontSize:7}}>●</span>BLK #{blockNum.toLocaleString()}
+          </div>
+          {connected?(
+            <>
+              <button onClick={()=>setShowNew(true)} style={{background:`linear-gradient(135deg,${C.cyan}1a,${C.purple}1a)`,border:`1px solid ${C.cyan}55`,borderRadius:6,padding:"6px 14px",cursor:"pointer",fontFamily:"'Share Tech Mono',monospace",fontSize:9,color:C.cyan,letterSpacing:"0.12em"}}>+ NEW LOCK</button>
+              <WalletBadge onDisconnect={()=>setConnected(false)}/>
+            </>
+          ):(
+            <button onClick={()=>setConnected(false)} style={{background:`linear-gradient(135deg,${C.cyan}1a,${C.purple}1a)`,border:`1px solid ${C.cyan}`,borderRadius:6,padding:"6px 16px",cursor:"pointer",fontFamily:"'Share Tech Mono',monospace",fontSize:9,color:C.cyan,letterSpacing:"0.14em"}}>◈ CONNECT OP_WALLET</button>
+          )}
+        </div>
+      </div>
+      <Ticker/>
+      {/* BODY */}
+      {!connected?(
+        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",position:"relative",zIndex:1}}>
+          <WalletGate onConnect={()=>setConnected(true)}/>
+        </div>
+      ):(
+        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",position:"relative",zIndex:1,animation:"fadeUp 0.35s ease"}}>
+          <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,background:`${C.surf}88`,flexShrink:0}}>
+            {[{l:"TOTAL LOCKED",v:totalLP.toLocaleString()+" LP",c:C.cyan},{l:"ACTIVE LOCKS",v:locks.filter(l=>!l.done).length,c:C.text},{l:"PERMANENT",v:locks.filter(l=>l.perm).length,c:C.cyan},{l:"LP PAIRS",v:new Set(locks.map(l=>l.token)).size,c:C.text}].map(({l,v,c},i)=>(
+              <div key={i} style={{flex:1,padding:"10px 20px",borderRight:i<3?`1px solid ${C.border}`:"none"}}>
+                <div style={{fontSize:7,color:C.muted,letterSpacing:"0.14em",marginBottom:4}}>{l}</div>
+                <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:19,color:c}}>{v}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{flex:1,display:"flex",overflow:"hidden",minHeight:0}}>
+            <div style={{width:295,borderRight:`1px solid ${C.border}`,display:"flex",flexDirection:"column",overflow:"hidden",flexShrink:0}}>
+              <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,background:C.surf2,flexShrink:0}}>
+                {["all","permanent","timed","released"].map(f=>(
+                  <button key={f} onClick={()=>setFilter(f)} style={{flex:1,padding:"8px 0",background:"none",border:"none",borderBottom:`2px solid ${filter===f?C.cyan:"transparent"}`,cursor:"pointer",fontFamily:"'Share Tech Mono',monospace",fontSize:7,color:filter===f?C.cyan:C.muted}}>{f.toUpperCase()}</button>
+                ))}
+              </div>
+              <div style={{flex:1,overflowY:"auto",padding:8,display:"flex",flexDirection:"column",gap:5}}>
+                {filtered.map((lock,i)=>(
+                  <div key={lock.id} style={{animation:`slideIn 0.18s ease ${i*0.04}s both`}}>
+                    <LockCard lock={lock} selected={selected&&selected.id===lock.id} onClick={()=>setSelected(lock)}/>
+                  </div>
+                ))}
+                {filtered.length===0&&<div style={{textAlign:"center",color:C.muted,fontSize:9,padding:36}}>NO LOCKS IN THIS CATEGORY</div>}
+              </div>
+            </div>
+            <div style={{flex:1,padding:12,display:"flex",overflow:"hidden",minWidth:0}}>
+              <DetailPanel lock={selected} onClose={()=>setSelected(null)}/>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* FOOTER */}
+      <div style={{position:"relative",zIndex:9,padding:"7px 20px",borderTop:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:`${C.surf}dd`,fontSize:7,color:C.muted,letterSpacing:"0.08em",flexShrink:0}}>
+        <div>P2OP DEPLOYED · REENTRANCY GUARD · CEI ORDERING · OPSCAN INDEXED</div>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <span>btc-vision/opwallet</span><span style={{color:C.border}}>|</span>
+          <span>DeployableOP_20</span><span style={{color:C.border}}>|</span>
+          <span style={{color:C.cyan,animation:"pulse 3s ease-in-out infinite"}}>⬡ OP_NET</span>
+        </div>
+      </div>
+      {showNew&&connected&&<NewLockModal onClose={()=>setShowNew(false)} onAdd={handleAdd}/>}
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App/>);
+  </script>
+</body>
+</html>

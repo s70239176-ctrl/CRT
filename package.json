@@ -1,0 +1,14 @@
+{
+  "name": "motoswap-liquidity-locker",
+  "version": "3.0.0",
+  "private": true,
+  "scripts": {
+    "start": "npx serve . -p ${PORT:-3000} -s"
+  },
+  "dependencies": {
+    "serve": "^14.2.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

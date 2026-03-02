@@ -1,0 +1,20 @@
+{
+  "entries": ["src/LiquidityLocker.ts"],
+  "options": {
+    "bindings": "esm"
+  },
+  "targets": {
+    "debug": {
+      "debug": true,
+      "outFile": "dist/LiquidityLocker.debug.wasm"
+    },
+    "release": {
+      "optimizeLevel": 3,
+      "shrinkLevel": 1,
+      "outFile": "dist/LiquidityLocker.wasm",
+      "textFile": "dist/LiquidityLocker.wat",
+      "sourceMap": true,
+      "runtime": "stub"
+    }
+  }
+}
