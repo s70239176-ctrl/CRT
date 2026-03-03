@@ -1,14 +1,18 @@
 {
-  "name": "motoswap-liquidity-locker",
-  "version": "3.0.0",
-  "private": true,
-  "scripts": {
-    "start": "npx serve . -p ${PORT:-3000} -s"
-  },
-  "dependencies": {
-    "serve": "^14.2.3"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  }
+    "name": "motoswap-liquidity-locker-contract",
+    "version": "3.0.0",
+    "type": "module",
+    "scripts": {
+        "build": "asc src/index.ts --target locker --measure --uncheckedBehavior never",
+        "build:debug": "asc src/index.ts --target locker --debug"
+    },
+    "dependencies": {
+        "@btc-vision/as-bignum": "^0.0.6",
+        "@btc-vision/btc-runtime": "^1.10.8",
+        "@btc-vision/opnet-transform": "^0.1.12"
+    },
+    "devDependencies": {
+        "@btc-vision/assemblyscript": "^0.29.2",
+        "prettier": "^3.7.4"
+    }
 }

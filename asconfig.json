@@ -1,20 +1,29 @@
 {
-  "entries": ["src/LiquidityLocker.ts"],
-  "options": {
-    "bindings": "esm"
-  },
-  "targets": {
-    "debug": {
-      "debug": true,
-      "outFile": "dist/LiquidityLocker.debug.wasm"
+    "targets": {
+        "locker": {
+            "outFile": "build/LiquidityLocker.wasm",
+            "use": ["abort=src/index/abort"]
+        }
     },
-    "release": {
-      "optimizeLevel": 3,
-      "shrinkLevel": 1,
-      "outFile": "dist/LiquidityLocker.wasm",
-      "textFile": "dist/LiquidityLocker.wat",
-      "sourceMap": true,
-      "runtime": "stub"
+    "options": {
+        "sourceMap": false,
+        "optimizeLevel": 3,
+        "shrinkLevel": 1,
+        "converge": true,
+        "noAssert": false,
+        "enable": [
+            "sign-extension",
+            "mutable-globals",
+            "nontrapping-f2i",
+            "bulk-memory",
+            "simd",
+            "reference-types",
+            "multi-value"
+        ],
+        "runtime": "stub",
+        "memoryBase": 0,
+        "initialMemory": 1,
+        "exportStart": "start",
+        "transform": "@btc-vision/opnet-transform"
     }
-  }
 }
