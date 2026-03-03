@@ -16,3 +16,6 @@
         "prettier": "^3.7.4"
     }
 }
+"overrides": {
+  "@noble/hashes": "2.0.1"
+}
