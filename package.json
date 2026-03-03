@@ -1,21 +1,21 @@
+cat > package.json << 'EOF'
 {
     "name": "motoswap-liquidity-locker-contract",
     "version": "3.0.0",
     "type": "module",
     "scripts": {
-        "build": "asc src/index.ts --target locker --measure --uncheckedBehavior never",
-        "build:debug": "asc src/index.ts --target locker --debug"
+        "build": "asc src/index.ts --config asconfig.json --target debug"
     },
     "dependencies": {
-        "@btc-vision/as-bignum": "^0.0.6",
-        "@btc-vision/btc-runtime": "^1.10.8",
-        "@btc-vision/opnet-transform": "^0.1.12"
+        "@btc-vision/as-bignum": "0.1.2",
+        "@btc-vision/btc-runtime": "rc"
     },
     "devDependencies": {
         "@btc-vision/assemblyscript": "^0.29.2",
-        "prettier": "^3.7.4"
+        "@btc-vision/opnet-transform": "1.1.0"
+    },
+    "overrides": {
+        "@noble/hashes": "2.0.1"
     }
 }
-"overrides": {
-  "@noble/hashes": "2.0.1"
-}
+EOF
