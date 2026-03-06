@@ -1,6 +1,6 @@
 import { Blockchain } from '@btc-vision/btc-runtime/runtime';
 import { revertOnError } from '@btc-vision/btc-runtime/runtime/abort/abort';
-import { LiquidityLocker } from './contract/LiquidityLocker';
+import { LiquidityLocker } from './LiquidityLocker';
 
 // DO NOT TOUCH THIS.
 Blockchain.contract = () => {

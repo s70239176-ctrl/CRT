@@ -4,7 +4,11 @@ cat > package.json << 'EOF'
     "version": "3.0.0",
     "type": "module",
     "scripts": {
+<<<<<<< Updated upstream
         "build": "asc src/index.ts --config asconfig.json --target debug"
+=======
+        "build": "asc src/index.ts --config asconfig.json --target debug --uncheckedBehavior never"
+>>>>>>> Stashed changes
     },
     "dependencies": {
         "@btc-vision/as-bignum": "0.1.2",

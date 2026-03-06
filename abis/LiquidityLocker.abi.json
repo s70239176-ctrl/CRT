@@ -1,0 +1,690 @@
+{
+    "functions": [
+        {
+            "name": "lockPermanent",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "token",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "amount",
+                    "type": "UINT256"
+                },
+                {
+                    "name": "label",
+                    "type": "STRING"
+                },
+                {
+                    "name": "tag",
+                    "type": "STRING"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "lockId",
+                    "type": "UINT64"
+                }
+            ]
+        },
+        {
+            "name": "lockTimed",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "token",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "amount",
+                    "type": "UINT256"
+                },
+                {
+                    "name": "unlockBlock",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "label",
+                    "type": "STRING"
+                },
+                {
+                    "name": "tag",
+                    "type": "STRING"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "lockId",
+                    "type": "UINT64"
+                }
+            ]
+        },
+        {
+            "name": "unlock",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "lockId",
+                    "type": "UINT64"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "success",
+                    "type": "BOOL"
+                }
+            ]
+        },
+        {
+            "name": "unlockPartial",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "lockId",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "partial",
+                    "type": "UINT256"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "success",
+                    "type": "BOOL"
+                }
+            ]
+        },
+        {
+            "name": "splitLock",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "lockId",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "splitAmount",
+                    "type": "UINT256"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "childLockId",
+                    "type": "UINT64"
+                }
+            ]
+        },
+        {
+            "name": "batchLockTimed",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "count",
+                    "type": "UINT32"
+                },
+                {
+                    "name": "tokens",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "amounts",
+                    "type": "UINT256"
+                },
+                {
+                    "name": "unlockBlocks",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "labels",
+                    "type": "STRING"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "lockIds",
+                    "type": "UINT64"
+                }
+            ]
+        },
+        {
+            "name": "extendLock",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "lockId",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "newUnlockBlock",
+                    "type": "UINT64"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "success",
+                    "type": "BOOL"
+                }
+            ]
+        },
+        {
+            "name": "transferLockOwnership",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "lockId",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "newOwner",
+                    "type": "ADDRESS"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "success",
+                    "type": "BOOL"
+                }
+            ]
+        },
+        {
+            "name": "setFactory",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "factory",
+                    "type": "ADDRESS"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "success",
+                    "type": "BOOL"
+                }
+            ]
+        },
+        {
+            "name": "setPaused",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "paused",
+                    "type": "BOOL"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "success",
+                    "type": "BOOL"
+                }
+            ]
+        },
+        {
+            "name": "setFee",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "feeSats",
+                    "type": "UINT64"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "success",
+                    "type": "BOOL"
+                }
+            ]
+        },
+        {
+            "name": "setTreasury",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "treasury",
+                    "type": "ADDRESS"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "success",
+                    "type": "BOOL"
+                }
+            ]
+        },
+        {
+            "name": "withdrawFees",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "feesCleared",
+                    "type": "UINT256"
+                }
+            ]
+        },
+        {
+            "name": "getLock",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "lockId",
+                    "type": "UINT64"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "token",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "owner",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "amount",
+                    "type": "UINT256"
+                },
+                {
+                    "name": "unlockBlock",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "isPermanent",
+                    "type": "BOOL"
+                },
+                {
+                    "name": "isReleased",
+                    "type": "BOOL"
+                },
+                {
+                    "name": "isExtended",
+                    "type": "BOOL"
+                },
+                {
+                    "name": "parentId",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "splitCount",
+                    "type": "UINT64"
+                }
+            ]
+        },
+        {
+            "name": "getLockV2",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "lockId",
+                    "type": "UINT64"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "token",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "owner",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "amount",
+                    "type": "UINT256"
+                },
+                {
+                    "name": "unlockBlock",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "isPermanent",
+                    "type": "BOOL"
+                },
+                {
+                    "name": "isReleased",
+                    "type": "BOOL"
+                },
+                {
+                    "name": "isExtended",
+                    "type": "BOOL"
+                },
+                {
+                    "name": "parentId",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "splitCount",
+                    "type": "UINT64"
+                }
+            ]
+        },
+        {
+            "name": "getLocksForToken",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "token",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "offset",
+                    "type": "UINT32"
+                },
+                {
+                    "name": "limit",
+                    "type": "UINT32"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "lockIds",
+                    "type": "UINT64"
+                }
+            ]
+        },
+        {
+            "name": "getLocksForOwner",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "owner",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "offset",
+                    "type": "UINT32"
+                },
+                {
+                    "name": "limit",
+                    "type": "UINT32"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "lockIds",
+                    "type": "UINT64"
+                }
+            ]
+        },
+        {
+            "name": "getTotalLocked",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "token",
+                    "type": "ADDRESS"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "total",
+                    "type": "UINT256"
+                }
+            ]
+        },
+        {
+            "name": "getLockCount",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "token",
+                    "type": "ADDRESS"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "count",
+                    "type": "UINT64"
+                }
+            ]
+        },
+        {
+            "name": "isLockPermanent",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "lockId",
+                    "type": "UINT64"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "isPermanent",
+                    "type": "BOOL"
+                }
+            ]
+        },
+        {
+            "name": "isUnlockable",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [
+                {
+                    "name": "lockId",
+                    "type": "UINT64"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "unlockable",
+                    "type": "BOOL"
+                }
+            ]
+        },
+        {
+            "name": "version",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "version",
+                    "type": "STRING"
+                }
+            ]
+        },
+        {
+            "name": "isPaused",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "paused",
+                    "type": "BOOL"
+                }
+            ]
+        },
+        {
+            "name": "getFee",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "fee",
+                    "type": "UINT64"
+                }
+            ]
+        },
+        {
+            "name": "getTreasury",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "treasury",
+                    "type": "ADDRESS"
+                }
+            ]
+        },
+        {
+            "name": "getFeesCollected",
+            "type": "Function",
+            "payable": false,
+            "onlyOwner": false,
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "feesCollected",
+                    "type": "UINT256"
+                }
+            ]
+        }
+    ],
+    "events": [
+        {
+            "name": "LockCreated",
+            "values": [
+                {
+                    "name": "lockId",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "caller",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "token",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "amount",
+                    "type": "UINT256"
+                },
+                {
+                    "name": "perm",
+                    "type": "BOOL"
+                },
+                {
+                    "name": "unlockBlock",
+                    "type": "UINT64"
+                }
+            ],
+            "type": "Event"
+        },
+        {
+            "name": "LockReleased",
+            "values": [
+                {
+                    "name": "lockId",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "owner",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "token",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "amount",
+                    "type": "UINT256"
+                }
+            ],
+            "type": "Event"
+        },
+        {
+            "name": "LockSplit",
+            "values": [
+                {
+                    "name": "parentId",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "childId",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "splitAmount",
+                    "type": "UINT256"
+                },
+                {
+                    "name": "remaining",
+                    "type": "UINT256"
+                }
+            ],
+            "type": "Event"
+        },
+        {
+            "name": "LockExtended",
+            "values": [
+                {
+                    "name": "lockId",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "newBlock",
+                    "type": "UINT64"
+                }
+            ],
+            "type": "Event"
+        },
+        {
+            "name": "LockOwnershipTransferred",
+            "values": [
+                {
+                    "name": "lockId",
+                    "type": "UINT64"
+                },
+                {
+                    "name": "oldOwner",
+                    "type": "ADDRESS"
+                },
+                {
+                    "name": "newOwner",
+                    "type": "ADDRESS"
+                }
+            ],
+            "type": "Event"
+        }
+    ]
+}

@@ -16,8 +16,12 @@ cat > asconfig.json << 'EOF'
         "runtime": "stub",
         "memoryBase": 0,
         "initialMemory": 1,
+<<<<<<< Updated upstream
         "exportStart": "start",
         "use": ["abort=index/abort"]
+=======
+        "exportStart": "start"
+>>>>>>> Stashed changes
     }
 }
 EOF
