@@ -122,7 +122,7 @@ export default function App() {
           {isConnected
             ? <><span className="addr mono">{shortAddr(address??'')}</span>
                 <button className="btn btn-ghost btn-sm" onClick={disconnect}>Disconnect</button></>
-            : <button className="btn btn-primary" onClick={()=>connectToWallet(SupportedWallets.OPWallet)}>Connect Wallet</button>}
+            : <button className="btn btn-primary" onClick={()=>connectToWallet(SupportedWallets.OP_WALLET)}>Connect Wallet</button>}
         </div>
       </header>
       <div className="infobar">
@@ -135,7 +135,7 @@ export default function App() {
             <div className="splash-icon">⬡</div>
             <h2>Connect your wallet</h2>
             <p>Connect OP_WALLET to view and manage your token locks.</p>
-            <button className="btn btn-primary btn-lg" onClick={()=>connectToWallet(SupportedWallets.OPWallet)}>Connect OP_WALLET</button>
+            <button className="btn btn-primary btn-lg" onClick={()=>connectToWallet(SupportedWallets.OP_WALLET)}>Connect OP_WALLET</button>
           </div>
         ):(
           <>
