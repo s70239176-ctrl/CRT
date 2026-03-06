@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useWalletConnect, SupportedWallets } from '@btc-vision/walletconnect';
+import { useWalletConnect } from '@btc-vision/walletconnect';
 import { useLocker, LockInfo } from './hooks/useLocker';
 import { LOCKER_ADDRESS, NETWORK_NAME } from './config';
 
 const shortAddr = (a: string) => !a || a.length < 12 ? a : a.slice(0,8)+'…'+a.slice(-6);
 const fmtAmt = (n: bigint, dec=18) => {
   if (!n) return '0';
-  const d=10n**BigInt(dec),w=n/d,f=(n%d).toString().padStart(dec,'0').replace(/0+$/,'');
+  const d=10n**BigInt(dec), w=n/d, f=(n%d).toString().padStart(dec,'0').replace(/0+$/,'');
   return f ? `${w}.${f.slice(0,6)}` : `${w}`;
 };
 
@@ -15,8 +15,8 @@ function Row({label,val,mono}:{label:string;val:string;mono?:boolean}) {
 }
 
 function LockCard({lock,onUnlock}:{lock:LockInfo;onUnlock:(id:bigint)=>void}) {
-  const s=lock.isReleased?'RELEASED':lock.isPermanent?'PERMANENT':'TIMELOCKED';
-  const c=lock.isReleased?'#666':lock.isPermanent?'#ff6b35':'#00e5a0';
+  const s = lock.isReleased?'RELEASED':lock.isPermanent?'PERMANENT':'TIMELOCKED';
+  const c = lock.isReleased?'#666':lock.isPermanent?'#ff6b35':'#00e5a0';
   return (
     <div className="card">
       <div className="card-head">
@@ -60,8 +60,8 @@ function CreateForm({onSubmit}:{onSubmit:(d:any)=>void}) {
 }
 
 export default function App() {
-  const {isConnected,address,connectToWallet,disconnect}=useWalletConnect();
-  const {getLocksForOwner,getVersion,getIsPaused,buildLockTimed,buildLockPermanent,buildUnlock}=useLocker();
+  const { openConnectModal, disconnect, walletAddress, connecting, network } = useWalletConnect();
+  const { getLocksForOwner, getVersion, getIsPaused, buildLockTimed, buildLockPermanent, buildUnlock } = useLocker();
   const [locks,setLocks]=useState<LockInfo[]>([]);
   const [version,setVersion]=useState('');
   const [paused,setPaused]=useState(false);
@@ -69,40 +69,39 @@ export default function App() {
   const [tab,setTab]=useState<'locks'|'create'>('locks');
   const [err,setErr]=useState('');
 
-  useEffect(()=>{
-    getVersion().then(setVersion).catch(()=>{});
-    getIsPaused().then(setPaused).catch(()=>{});
-  },[]);
+  useEffect(()=>{ getVersion().then(setVersion).catch(()=>{}); getIsPaused().then(setPaused).catch(()=>{}); },[]);
 
-  const loadLocks=useCallback(async()=>{
-    if(!address)return;
-    setLoading(true);setErr('');
-    try{setLocks(await getLocksForOwner(address));}
-    catch(e:any){setErr(e?.message??'Failed to load locks');}
-    finally{setLoading(false);}
-  },[address,getLocksForOwner]);
+  const loadLocks = useCallback(async()=>{
+    if (!walletAddress) return;
+    setLoading(true); setErr('');
+    try { setLocks(await getLocksForOwner(walletAddress)); }
+    catch(e:any){ setErr(e?.message??'Failed to load locks'); }
+    finally { setLoading(false); }
+  },[walletAddress,getLocksForOwner]);
 
-  useEffect(()=>{if(isConnected&&address)loadLocks();},[isConnected,address]);
+  useEffect(()=>{ if(walletAddress) loadLocks(); },[walletAddress]);
 
-  const sendTx=async(calldata:Uint8Array)=>{
+  const sendTx = async(calldata:Uint8Array)=>{
     // @ts-ignore
     await window.opnet?.sendTransaction({to:LOCKER_ADDRESS,data:calldata});
     setTimeout(loadLocks,4000);
   };
 
-  const handleCreate=async(d:any)=>{
-    if(!d.token||!d.amount)return;setErr('');
-    try{
-      const amt=BigInt(Math.floor(parseFloat(d.amount)*1e18));
-      await sendTx(d.perm?buildLockPermanent(d.token,amt,d.label||'lock'):buildLockTimed(d.token,amt,BigInt(d.block||0),d.label||'lock'));
-    }catch(e:any){setErr(e?.message??'Transaction failed');}
+  const handleCreate = async(d:any)=>{
+    if(!d.token||!d.amount) return; setErr('');
+    try {
+      const amt = BigInt(Math.floor(parseFloat(d.amount)*1e18));
+      await sendTx(d.perm ? buildLockPermanent(d.token,amt,d.label||'lock') : buildLockTimed(d.token,amt,BigInt(d.block||0),d.label||'lock'));
+    } catch(e:any){ setErr(e?.message??'Transaction failed'); }
   };
 
-  const handleUnlock=async(lockId:bigint)=>{
+  const handleUnlock = async(lockId:bigint)=>{
     setErr('');
-    try{await sendTx(buildUnlock(lockId));}
-    catch(e:any){setErr(e?.message??'Transaction failed');}
+    try { await sendTx(buildUnlock(lockId)); }
+    catch(e:any){ setErr(e?.message??'Transaction failed'); }
   };
+
+  const isConnected = !!walletAddress;
 
   return (
     <div className="app">
@@ -112,54 +111,58 @@ export default function App() {
           <div>
             <div className="brand-name">MotoSwap Locker</div>
             <div className="brand-badges">
-              {version&&<span className="badge">{version}</span>}
+              {version && <span className="badge">{version}</span>}
               <span className="badge net">{NETWORK_NAME}</span>
-              {paused&&<span className="badge warn">PAUSED</span>}
+              {paused && <span className="badge warn">PAUSED</span>}
             </div>
           </div>
         </div>
         <div className="header-right">
-          {isConnected
-            ? <><span className="addr mono">{shortAddr(address??'')}</span>
-                <button className="btn btn-ghost btn-sm" onClick={disconnect}>Disconnect</button></>
-            : <button className="btn btn-primary" onClick={()=>connectToWallet(SupportedWallets.OP_WALLET)}>Connect Wallet</button>}
+          {connecting
+            ? <span className="addr">Connecting…</span>
+            : isConnected
+              ? <><span className="addr mono">{shortAddr(walletAddress)}</span>
+                  <button className="btn btn-ghost btn-sm" onClick={disconnect}>Disconnect</button></>
+              : <button className="btn btn-primary" onClick={openConnectModal}>Connect Wallet</button>}
         </div>
       </header>
+
       <div className="infobar">
         <span><span className="dim">Contract</span><span className="mono">{shortAddr(LOCKER_ADDRESS)}</span></span>
-        <span><span className="dim">Network</span>{NETWORK_NAME}</span>
+        <span><span className="dim">Network</span>{network?.network ?? NETWORK_NAME}</span>
       </div>
+
       <main>
-        {!isConnected?(
+        {!isConnected ? (
           <div className="splash">
             <div className="splash-icon">⬡</div>
             <h2>Connect your wallet</h2>
             <p>Connect OP_WALLET to view and manage your token locks.</p>
-            <button className="btn btn-primary btn-lg" onClick={()=>connectToWallet(SupportedWallets.OP_WALLET)}>Connect OP_WALLET</button>
+            <button className="btn btn-primary btn-lg" onClick={openConnectModal}>Connect Wallet</button>
           </div>
-        ):(
+        ) : (
           <>
             <div className="tabs">
               <button className={`tab${tab==='locks'?' active':''}`} onClick={()=>setTab('locks')}>
-                My Locks{locks.length>0&&<span className="count">{locks.length}</span>}
+                My Locks {locks.length>0 && <span className="count">{locks.length}</span>}
               </button>
               <button className={`tab${tab==='create'?' active':''}`} onClick={()=>setTab('create')}>Create Lock</button>
             </div>
-            {err&&<div className="error">{err}</div>}
-            {tab==='locks'&&(
+            {err && <div className="error">{err}</div>}
+            {tab==='locks' && (
               <div className="locks-section">
                 <div className="section-head">
                   <h2>Your Locks</h2>
                   <button className="btn btn-ghost btn-sm" onClick={loadLocks} disabled={loading}>{loading?'Loading…':'Refresh'}</button>
                 </div>
                 {loading
-                  ?<div className="grid">{[1,2,3].map(i=><div key={i} className="card skeleton"/>)}</div>
-                  :locks.length===0
-                    ?<div className="empty"><p>No locks found.</p><button className="btn btn-outline" onClick={()=>setTab('create')}>Create your first lock</button></div>
-                    :<div className="grid">{locks.map(l=><LockCard key={l.lockId.toString()} lock={l} onUnlock={handleUnlock}/>)}</div>}
+                  ? <div className="grid">{[1,2,3].map(i=><div key={i} className="card skeleton"/>)}</div>
+                  : locks.length===0
+                    ? <div className="empty"><p>No locks found.</p><button className="btn btn-outline" onClick={()=>setTab('create')}>Create your first lock</button></div>
+                    : <div className="grid">{locks.map(l=><LockCard key={l.lockId.toString()} lock={l} onUnlock={handleUnlock}/>)}</div>}
               </div>
             )}
-            {tab==='create'&&<CreateForm onSubmit={handleCreate}/>}
+            {tab==='create' && <CreateForm onSubmit={handleCreate}/>}
           </>
         )}
       </main>
