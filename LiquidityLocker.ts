@@ -1,320 +1,264 @@
+import { u256 } from '@btc-vision/as-bignum/assembly';
 import {
+    ABIDataTypes,
     Address,
     Blockchain,
     BytesWriter,
     Calldata,
-    encodeSelector,
+    EMPTY_POINTER,
+    MapOfMap,
+    NetEvent,
+    OP20,
     OP20InitParameters,
     Revert,
-    Selector,
+    SafeMath,
+    StoredAddress,
     StoredBoolean,
+    StoredMapU256,
     StoredString,
     StoredU256,
     StoredU64,
-    StoredAddress,
     TransferHelper,
-    u256,
-    OP20,
 } from '@btc-vision/btc-runtime/runtime';
 
-// ─── Testnet Configuration ────────────────────────────────────────────────────
-const TESTNET_CHAIN_ID: u64 = 2;
-const MIN_LOCK_BLOCKS: u64  = 1;
+// ─── Constants ────────────────────────────────────────────────────────────────
+const MIN_LOCK_BLOCKS: u64 = 1;
 const DEFAULT_FEE_SATS: u64 = 0;
-const MAX_BATCH: u32        = 10;
-const MAX_PAGE: u32         = 50;
-const MAX_LABEL: i32        = 64;
-const MAX_TAG: i32          = 32;
+const MAX_BATCH: u32 = 10;
+const MAX_PAGE: u32 = 50;
+const MAX_LABEL: i32 = 64;
+const MAX_TAG: i32 = 32;
 
-// ─── Storage Keys ─────────────────────────────────────────────────────────────
-const K_AMT     = 'a';
-const K_OWN     = 'o';
-const K_TOK     = 'k';
-const K_BLK     = 'b';
-const K_PERM    = 'p';
-const K_DONE    = 'd';
-const K_EXT     = 'e';
-const K_LBL     = 'l';
-const K_TAG     = 'tg';
-const K_NONCE   = 'nc';
-const K_PARENT  = 'pa';
-const K_SPLITS  = 'sp';
-const K_TOTAL   = 'tl';
-const K_TCNT    = 'tc';
-const K_TIDX    = 'ti';
-const K_OCNT    = 'oc';
-const K_OIDX    = 'oi';
-const K_CTR     = 'glc';
-const K_RENT    = 'rg';
-const K_PAUSE   = 'pau';
-const K_ADMIN   = 'dep';
-const K_FACT    = 'fac';
-const K_TREAS   = 'tr';
-const K_FEE     = 'fee';
-const K_FEES    = 'fes';
-const K_NET     = 'net';
-const K_NFTON   = 'nft';
-const K_NFT_OWN = 'no';
-const K_NFT_XFER= 'nx';
+// ─── Per-lock field IDs (used as part of composite map keys) ─────────────────
+// Each lock's fields are stored as: lockData.set(SHA256(lockId || fieldId), value)
+const F_AMT:    u256 = u256.fromU32(1);
+const F_TOKEN:  u256 = u256.fromU32(2);
+const F_OWNER:  u256 = u256.fromU32(3);
+const F_BLK:    u256 = u256.fromU32(4);
+const F_PERM:   u256 = u256.fromU32(5);
+const F_DONE:   u256 = u256.fromU32(6);
+const F_EXT:    u256 = u256.fromU32(7);
+const F_SPLITS: u256 = u256.fromU32(8);
+const F_PARENT: u256 = u256.fromU32(9);
 
-// ─── Selectors ────────────────────────────────────────────────────────────────
-const SEL_LOCK_PERM     = encodeSelector('lockPermanent(address,uint256,string,string)');
-const SEL_LOCK_TIMED    = encodeSelector('lockTimed(address,uint256,uint64,string,string)');
-const SEL_UNLOCK        = encodeSelector('unlock(uint64)');
-const SEL_UNLOCK_PART   = encodeSelector('unlockPartial(uint64,uint256)');
-const SEL_SPLIT         = encodeSelector('splitLock(uint64,uint256)');
-const SEL_BATCH_LOCK    = encodeSelector('batchLockTimed(address[],uint256[],uint64[],string[])');
-const SEL_EXTEND        = encodeSelector('extendLock(uint64,uint64)');
-const SEL_XFER_OWN      = encodeSelector('transferLockOwnership(uint64,address)');
-const SEL_SET_FACTORY   = encodeSelector('setFactory(address)');
-const SEL_SET_PAUSED    = encodeSelector('setPaused(bool)');
-const SEL_SET_FEE       = encodeSelector('setFee(uint64)');
-const SEL_SET_TREASURY  = encodeSelector('setTreasury(address)');
-const SEL_SET_NFT       = encodeSelector('setNFTReceiptsEnabled(bool)');
-const SEL_WITHDRAW_FEES = encodeSelector('withdrawFees()');
-const SEL_GET_LOCK      = encodeSelector('getLock(uint64)');
-const SEL_GET_LOCK_V2   = encodeSelector('getLockV2(uint64)');
-const SEL_LOCKS_TOKEN   = encodeSelector('getLocksForToken(address,uint32,uint32)');
-const SEL_LOCKS_OWNER   = encodeSelector('getLocksForOwner(address,uint32,uint32)');
-const SEL_TOTAL         = encodeSelector('getTotalLocked(address)');
-const SEL_IS_PERM       = encodeSelector('isLockPermanent(uint64)');
-const SEL_IS_UNLOCK     = encodeSelector('isUnlockable(uint64)');
-const SEL_CNT           = encodeSelector('getLockCount(address)');
-const SEL_VERSION       = encodeSelector('version()');
-const SEL_IS_PAUSED     = encodeSelector('isPaused()');
-const SEL_NFT_OWNER     = encodeSelector('nftOwner(uint64)');
-const SEL_FEE           = encodeSelector('getFee()');
-const SEL_TREASURY      = encodeSelector('getTreasury()');
-const SEL_FEES_COLL     = encodeSelector('getFeesCollected()');
+// ─── Events ───────────────────────────────────────────────────────────────────
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+@final
+class LockCreatedEvent extends NetEvent {
+    constructor(lockId: u64, caller: Address, token: Address, amount: u256, perm: bool, unlockBlock: u64) {
+        const data = new BytesWriter(8 + 32 + 32 + 32 + 1 + 8);
+        data.writeU64(lockId);
+        data.writeAddress(caller);
+        data.writeAddress(token);
+        data.writeU256(amount);
+        data.writeBoolean(perm);
+        data.writeU64(unlockBlock);
+        super('LockCreated', data);
+    }
+}
+
+@final
+class LockReleasedEvent extends NetEvent {
+    constructor(lockId: u64, owner: Address, token: Address, amount: u256) {
+        const data = new BytesWriter(8 + 32 + 32 + 32);
+        data.writeU64(lockId);
+        data.writeAddress(owner);
+        data.writeAddress(token);
+        data.writeU256(amount);
+        super('LockReleased', data);
+    }
+}
+
+@final
+class LockSplitEvent extends NetEvent {
+    constructor(parentId: u64, childId: u64, splitAmount: u256, parentRemaining: u256) {
+        const data = new BytesWriter(8 + 8 + 32 + 32);
+        data.writeU64(parentId);
+        data.writeU64(childId);
+        data.writeU256(splitAmount);
+        data.writeU256(parentRemaining);
+        super('LockSplit', data);
+    }
+}
+
+@final
+class LockExtendedEvent extends NetEvent {
+    constructor(lockId: u64, newBlock: u64) {
+        const data = new BytesWriter(16);
+        data.writeU64(lockId);
+        data.writeU64(newBlock);
+        super('LockExtended', data);
+    }
+}
+
+@final
+class LockOwnershipTransferredEvent extends NetEvent {
+    constructor(lockId: u64, oldOwner: Address, newOwner: Address) {
+        const data = new BytesWriter(8 + 32 + 32);
+        data.writeU64(lockId);
+        data.writeAddress(oldOwner);
+        data.writeAddress(newOwner);
+        super('LockOwnershipTransferred', data);
+    }
+}
+
+@final
+class ContractDeployedEvent extends NetEvent {
+    constructor(deployer: Address) {
+        const data = new BytesWriter(32);
+        data.writeAddress(deployer);
+        super('ContractDeployed', data);
+    }
+}
+
+// ─── Composite key helper ─────────────────────────────────────────────────────
 @inline
-function sk(prefix: string, id: string): string { return prefix + ':' + id; }
+function compKey(a: u256, b: u256): u256 {
+    const buf = new Uint8Array(64);
+    const aBytes = a.toUint8Array(true);
+    const bBytes = b.toUint8Array(true);
+    // Pad/slice to 32 bytes each
+    for (let i = 0; i < 32; i++) buf[i] = i < aBytes.length ? aBytes[aBytes.length - 32 + i] : 0;
+    for (let i = 0; i < 32; i++) buf[32 + i] = i < bBytes.length ? bBytes[bBytes.length - 32 + i] : 0;
+    return u256.fromBytes(Blockchain.sha256(buf));
+}
 
 @inline
-function revert(msg: string): void { throw new Revert('LiquidityLocker: ' + msg); }
+function lockKey(lockId: u64, field: u256): u256 {
+    return compKey(u256.fromU64(lockId), field);
+}
+
+@inline
+function addrToU256(addr: Address): u256 {
+    const b = addr.toBytes();
+    return u256.fromBytes(b);
+}
+
+@inline
+function u256ToAddr(v: u256): Address {
+    const b = v.toUint8Array(true);
+    const padded = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) padded[i] = i < b.length ? b[b.length - 32 + i] : 0;
+    return Address.fromUint8Array(padded);
+}
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
 
-/**
- * LiquidityLocker v3.0 — MotoSwap LP token locker for OP_NET TESTNET.
- *
- * Extends OP20 so it can optionally issue NFT receipt tokens.
- * All locking logic is handled via execute() selector dispatch.
- */
+@final
 export class LiquidityLocker extends OP20 {
+
+    // ── Storage pointers (each Blockchain.nextPointer call returns a unique u16) ──
+    private readonly _adminPtr:      u16 = Blockchain.nextPointer;
+    private readonly _pausedPtr:     u16 = Blockchain.nextPointer;
+    private readonly _rentPtr:       u16 = Blockchain.nextPointer;
+    private readonly _feePtr:        u16 = Blockchain.nextPointer;
+    private readonly _ctrPtr:        u16 = Blockchain.nextPointer;
+    private readonly _feesColPtr:    u16 = Blockchain.nextPointer;
+    private readonly _treasPtr:      u16 = Blockchain.nextPointer;
+    private readonly _factPtr:       u16 = Blockchain.nextPointer;
+    private readonly _lockDataPtr:   u16 = Blockchain.nextPointer;
+    private readonly _tknCntPtr:     u16 = Blockchain.nextPointer;
+    private readonly _tknIdxPtr:     u16 = Blockchain.nextPointer;
+    private readonly _ownCntPtr:     u16 = Blockchain.nextPointer;
+    private readonly _ownIdxPtr:     u16 = Blockchain.nextPointer;
+    private readonly _totalLockedPtr:u16 = Blockchain.nextPointer;
+
+    // ── Stored instances ──────────────────────────────────────────────────────
+    private _admin:        StoredAddress;
+    private _paused:       StoredBoolean;
+    private _reentrancy:   StoredBoolean;
+    private _fee:          StoredU64;
+    private _lockCounter:  StoredU64;
+    private _feesCollected:StoredU256;
+    private _treasury:     StoredAddress;
+    private _factory:      StoredAddress;
+
+    // ── Maps ──────────────────────────────────────────────────────────────────
+    private _lockData:    StoredMapU256;  // lockKey(id, fieldId) -> value
+    private _tknCnt:      StoredMapU256;  // token addr -> count
+    private _tknIdx:      StoredMapU256;  // compKey(token, i) -> lockId
+    private _ownCnt:      StoredMapU256;  // owner addr -> count
+    private _ownIdx:      StoredMapU256;  // compKey(owner, i) -> lockId
+    private _totalLocked: StoredMapU256;  // token addr -> total amount
 
     public constructor() {
         super();
+
+        this._admin        = new StoredAddress(this._adminPtr);
+        this._paused       = new StoredBoolean(this._pausedPtr, false);
+        this._reentrancy   = new StoredBoolean(this._rentPtr, false);
+        this._fee          = new StoredU64(this._feePtr, EMPTY_POINTER);
+        this._lockCounter  = new StoredU64(this._ctrPtr, EMPTY_POINTER);
+        this._feesCollected= new StoredU256(this._feesColPtr, EMPTY_POINTER);
+        this._treasury     = new StoredAddress(this._treasPtr);
+        this._factory      = new StoredAddress(this._factPtr);
+
+        this._lockData     = new StoredMapU256(this._lockDataPtr);
+        this._tknCnt       = new StoredMapU256(this._tknCntPtr);
+        this._tknIdx       = new StoredMapU256(this._tknIdxPtr);
+        this._ownCnt       = new StoredMapU256(this._ownCntPtr);
+        this._ownIdx       = new StoredMapU256(this._ownIdxPtr);
+        this._totalLocked  = new StoredMapU256(this._totalLockedPtr);
     }
 
     public override onDeployment(_calldata: Calldata): void {
-        // Initialise as a zero-supply token (NFT receipts only, no fungible supply)
         this.instantiate(new OP20InitParameters(
-            u256.Zero,
-            0,
+            u256.Zero, 0,
             'MotoSwap Liquidity Locker',
             'MLOCK',
         ));
-
         const deployer = Blockchain.tx.sender;
-        new StoredAddress(K_ADMIN, Address.dead()).value = deployer;
-        new StoredBoolean(K_PAUSE, false).value          = false;
-        new StoredBoolean(K_RENT,  false).value          = false;
-        new StoredBoolean(K_NFTON, false).value          = false;
-        new StoredU64    (K_FEE,   0 as u64).value       = DEFAULT_FEE_SATS;
-        new StoredAddress(K_TREAS, Address.dead()).value  = deployer;
-        new StoredU64    (K_NET,   0 as u64).value       = TESTNET_CHAIN_ID;
-
-        const ev = new BytesWriter(128);
-        ev.writeAddress(deployer);
-        ev.writeU64(Blockchain.block.number);
-        ev.writeU64(TESTNET_CHAIN_ID);
-        ev.writeStringWithLength('MotoSwap Liquidity Locker v3.0 — TESTNET');
-        Blockchain.emit('ContractDeployed', ev);
+        this._admin.value    = deployer;
+        this._treasury.value = deployer;
+        this._paused.value   = false;
+        this._fee.set(0, DEFAULT_FEE_SATS);
+        this.emitEvent(new ContractDeployedEvent(deployer));
     }
 
-    public override execute(method: Selector, calldata: Calldata): BytesWriter {
-        // Delegate OP20 built-ins first
-        const base = super.execute(method, calldata);
-        if (base !== null) return base;
+    // =========================================================================
+    // ── Write Methods ─────────────────────────────────────────────────────────
+    // =========================================================================
 
-        switch (method) {
-            case SEL_LOCK_PERM:     return this._lockPermanent(calldata);
-            case SEL_LOCK_TIMED:    return this._lockTimed(calldata);
-            case SEL_UNLOCK:        return this._unlock(calldata);
-            case SEL_UNLOCK_PART:   return this._unlockPartial(calldata);
-            case SEL_SPLIT:         return this._splitLock(calldata);
-            case SEL_BATCH_LOCK:    return this._batchLockTimed(calldata);
-            case SEL_EXTEND:        return this._extendLock(calldata);
-            case SEL_XFER_OWN:      return this._transferOwnership(calldata);
-            case SEL_SET_FACTORY:   return this._setFactory(calldata);
-            case SEL_SET_PAUSED:    return this._setPaused(calldata);
-            case SEL_SET_FEE:       return this._setFee(calldata);
-            case SEL_SET_TREASURY:  return this._setTreasury(calldata);
-            case SEL_SET_NFT:       return this._setNFTReceiptsEnabled(calldata);
-            case SEL_WITHDRAW_FEES: return this._withdrawFees(calldata);
-            case SEL_GET_LOCK:      return this._getLock(calldata);
-            case SEL_GET_LOCK_V2:   return this._getLockV2(calldata);
-            case SEL_LOCKS_TOKEN:   return this._getLocksForToken(calldata);
-            case SEL_LOCKS_OWNER:   return this._getLocksForOwner(calldata);
-            case SEL_TOTAL:         return this._getTotalLocked(calldata);
-            case SEL_IS_PERM:       return this._isLockPermanent(calldata);
-            case SEL_IS_UNLOCK:     return this._isUnlockable(calldata);
-            case SEL_CNT:           return this._getLockCount(calldata);
-            case SEL_VERSION:       return this._version();
-            case SEL_IS_PAUSED:     return this._isPaused();
-            case SEL_NFT_OWNER:     return this._nftOwner(calldata);
-            case SEL_FEE:           return this._getFee();
-            case SEL_TREASURY:      return this._getTreasury();
-            case SEL_FEES_COLL:     return this._getFeesCollected();
-            default:
-                throw new Revert(`Method not found: ${method}`);
-        }
-    }
-
-    // ─── Security Guards ──────────────────────────────────────────────────────
-
-    private _enter(): void {
-        const g = new StoredBoolean(K_RENT, false);
-        if (g.value) revert('reentrancy');
-        g.value = true;
-    }
-
-    private _exit(): void {
-        new StoredBoolean(K_RENT, false).value = false;
-    }
-
-    private _requireActive(): void {
-        if (new StoredBoolean(K_PAUSE, false).value) revert('contract paused');
-    }
-
-    private _requireAdmin(): void {
-        if (!new StoredAddress(K_ADMIN, Address.dead()).value.equals(Blockchain.tx.sender))
-            revert('admin only');
-    }
-
-    // ─── Internal Helpers ─────────────────────────────────────────────────────
-
-    private _nextId(): u64 {
-        const s = new StoredU64(K_CTR, 0 as u64);
-        const n = s.value + (1 as u64);
-        s.value = n;
-        return n;
-    }
-
-    private _ownerNonce(owner: Address): u64 {
-        const key   = sk('on', owner.toString());
-        const store = new StoredU64(key, 0 as u64);
-        const n     = store.value;
-        store.value = n + (1 as u64);
-        return n;
-    }
-
-    private _store(
-        id      : u64,
-        token   : Address,
-        owner   : Address,
-        amount  : u256,
-        blk     : u64,
-        perm    : boolean,
-        label   : string,
-        tag     : string,
-        parentId: u64,
-    ): void {
-        const s = id.toString();
-
-        new StoredU256   (sk(K_AMT,   s), u256.Zero    ).value = amount;
-        new StoredAddress(sk(K_OWN,   s), Address.dead()).value = owner;
-        new StoredAddress(sk(K_TOK,   s), Address.dead()).value = token;
-        new StoredU64    (sk(K_BLK,   s), 0 as u64    ).value = blk;
-        new StoredBoolean(sk(K_PERM,  s), false        ).value = perm;
-        new StoredBoolean(sk(K_DONE,  s), false        ).value = false;
-        new StoredBoolean(sk(K_EXT,   s), false        ).value = false;
-        new StoredString (sk(K_LBL,   s), ''           ).value = label;
-        new StoredString (sk(K_TAG,   s), ''           ).value = tag.length <= MAX_TAG ? tag : tag.slice(0, MAX_TAG);
-        new StoredU64    (sk(K_NONCE, s), 0 as u64    ).value = this._ownerNonce(owner);
-        new StoredU64    (sk(K_PARENT,s), 0 as u64    ).value = parentId;
-        new StoredU64    (sk(K_SPLITS,s), 0 as u64    ).value = 0 as u64;
-
-        const tStr = token.toString();
-        const tCnt = new StoredU64(sk(K_TCNT, tStr), 0 as u64);
-        new StoredU64(sk(K_TIDX, tStr + ':' + tCnt.value.toString()), 0 as u64).value = id;
-        tCnt.value = tCnt.value + (1 as u64);
-
-        const oStr = owner.toString();
-        const oCnt = new StoredU64(sk(K_OCNT, oStr), 0 as u64);
-        new StoredU64(sk(K_OIDX, oStr + ':' + oCnt.value.toString()), 0 as u64).value = id;
-        oCnt.value = oCnt.value + (1 as u64);
-
-        const tot = new StoredU256(sk(K_TOTAL, tStr), u256.Zero);
-        tot.value = tot.value + amount;
-
-        if (new StoredBoolean(K_NFTON, false).value) {
-            new StoredAddress(sk(K_NFT_OWN,  s), Address.dead()).value = owner;
-            new StoredBoolean(sk(K_NFT_XFER, s), false         ).value = perm;
-        }
-    }
-
-    private _pull(token: Address, from: Address, amount: u256): void {
-        TransferHelper.transferFrom(token, from, this.address, amount);
-    }
-
-    private _push(token: Address, to: Address, amount: u256): void {
-        TransferHelper.transfer(token, to, amount);
-    }
-
-    private _collectFee(): void {
-        const fee = new StoredU64(K_FEE, 0 as u64).value;
-        if (fee == (0 as u64)) return;
-        if (Blockchain.tx.value < fee)
-            revert('insufficient fee: send at least ' + fee.toString() + ' sats');
-        const collected = new StoredU256(K_FEES, u256.Zero);
-        collected.value = collected.value + u256.fromU64(fee);
-    }
-
-    // ─── Write Methods ────────────────────────────────────────────────────────
-
-    private _lockPermanent(calldata: Calldata): BytesWriter {
-        this._requireActive();
-        this._enter();
-        this._collectFee();
+    @method(
+        { name: 'token',  type: ABIDataTypes.ADDRESS  },
+        { name: 'amount', type: ABIDataTypes.UINT256  },
+        { name: 'label',  type: ABIDataTypes.STRING   },
+        { name: 'tag',    type: ABIDataTypes.STRING   },
+    )
+    @returns({ name: 'lockId', type: ABIDataTypes.UINT64 })
+    public lockPermanent(calldata: Calldata): BytesWriter {
+        this._requireActive(); this._enter(); this._collectFee();
 
         const token  = calldata.readAddress();
         const amount = calldata.readU256();
         const label  = calldata.readStringWithLength();
         const tag    = calldata.readStringWithLength();
 
-        if (amount == u256.Zero)       revert('zero amount');
-        if (label.length > MAX_LABEL)  revert('label max 64 chars');
+        if (amount.isZero()) throw new Revert('zero amount');
+        if (label.length > MAX_LABEL) throw new Revert('label too long');
 
         const caller = Blockchain.tx.sender;
-        this._pull(token, caller, amount);
+        TransferHelper.transferFrom(token, caller, this.address, amount);
 
         const lockId = this._nextId();
-        this._store(lockId, token, caller, amount, 0 as u64, true, label, tag, 0 as u64);
+        this._store(lockId, token, caller, amount, 0, true, 0);
 
-        const ev1 = new BytesWriter(160);
-        ev1.writeU64(lockId); ev1.writeAddress(caller); ev1.writeAddress(token);
-        ev1.writeU256(amount); ev1.writeBoolean(true); ev1.writeU64(0 as u64);
-        ev1.writeU64(Blockchain.block.number);
-        ev1.writeStringWithLength(label); ev1.writeStringWithLength(tag);
-        Blockchain.emit('LockCreated', ev1);
-
-        const ev2 = new BytesWriter(80);
-        ev2.writeU64(lockId); ev2.writeAddress(token); ev2.writeU256(amount); ev2.writeAddress(caller);
-        Blockchain.emit('LockPermanent', ev2);
-
+        this.emitEvent(new LockCreatedEvent(lockId, caller, token, amount, true, 0));
         this._exit();
-        const w = new BytesWriter(8);
-        w.writeU64(lockId);
-        return w;
+
+        const w = new BytesWriter(8); w.writeU64(lockId); return w;
     }
 
-    private _lockTimed(calldata: Calldata): BytesWriter {
-        this._requireActive();
-        this._enter();
-        this._collectFee();
+    @method(
+        { name: 'token',       type: ABIDataTypes.ADDRESS  },
+        { name: 'amount',      type: ABIDataTypes.UINT256  },
+        { name: 'unlockBlock', type: ABIDataTypes.UINT64   },
+        { name: 'label',       type: ABIDataTypes.STRING   },
+        { name: 'tag',         type: ABIDataTypes.STRING   },
+    )
+    @returns({ name: 'lockId', type: ABIDataTypes.UINT64 })
+    public lockTimed(calldata: Calldata): BytesWriter {
+        this._requireActive(); this._enter(); this._collectFee();
 
         const token       = calldata.readAddress();
         const amount      = calldata.readU256();
@@ -322,472 +266,555 @@ export class LiquidityLocker extends OP20 {
         const label       = calldata.readStringWithLength();
         const tag         = calldata.readStringWithLength();
 
-        if (amount == u256.Zero)      revert('zero amount');
-        if (label.length > MAX_LABEL) revert('label max 64 chars');
+        if (amount.isZero()) throw new Revert('zero amount');
+        if (label.length > MAX_LABEL) throw new Revert('label too long');
         if (unlockBlock <= Blockchain.block.number + MIN_LOCK_BLOCKS)
-            revert('unlockBlock too soon');
+            throw new Revert('unlockBlock too soon');
 
         const caller = Blockchain.tx.sender;
-        this._pull(token, caller, amount);
+        TransferHelper.transferFrom(token, caller, this.address, amount);
 
         const lockId = this._nextId();
-        this._store(lockId, token, caller, amount, unlockBlock, false, label, tag, 0 as u64);
+        this._store(lockId, token, caller, amount, unlockBlock, false, 0);
 
-        const ev = new BytesWriter(160);
-        ev.writeU64(lockId); ev.writeAddress(caller); ev.writeAddress(token);
-        ev.writeU256(amount); ev.writeBoolean(false); ev.writeU64(unlockBlock);
-        ev.writeU64(Blockchain.block.number);
-        ev.writeStringWithLength(label); ev.writeStringWithLength(tag);
-        Blockchain.emit('LockCreated', ev);
-
+        this.emitEvent(new LockCreatedEvent(lockId, caller, token, amount, false, unlockBlock));
         this._exit();
-        const w = new BytesWriter(8);
-        w.writeU64(lockId);
-        return w;
+
+        const w = new BytesWriter(8); w.writeU64(lockId); return w;
     }
 
-    private _unlock(calldata: Calldata): BytesWriter {
-        this._requireActive();
-        this._enter();
+    @method({ name: 'lockId', type: ABIDataTypes.UINT64 })
+    @returns({ name: 'success', type: ABIDataTypes.BOOL })
+    public unlock(calldata: Calldata): BytesWriter {
+        this._requireActive(); this._enter();
 
         const lockId = calldata.readU64();
-        const id     = lockId.toString();
 
-        if (new StoredBoolean(sk(K_PERM, id), false).value) revert('permanent lock');
-        const doneFlag = new StoredBoolean(sk(K_DONE, id), false);
-        if (doneFlag.value) revert('already released');
+        if (this._getBool(lockId, F_PERM)) throw new Revert('permanent lock');
+        if (this._getBool(lockId, F_DONE)) throw new Revert('already released');
 
-        const unlockBlock = new StoredU64(sk(K_BLK, id), 0 as u64).value;
-        if (unlockBlock == (0 as u64)) revert('lock not found');
-        if (Blockchain.block.number < unlockBlock)
-            revert('locked until block ' + unlockBlock.toString());
+        const unlockBlock = this._getU64(lockId, F_BLK);
+        if (unlockBlock == 0) throw new Revert('lock not found');
+        if (Blockchain.block.number < unlockBlock) throw new Revert('still locked');
 
-        const ownerStore = new StoredAddress(sk(K_OWN, id), Address.dead());
-        if (!ownerStore.value.equals(Blockchain.tx.sender)) revert('not lock owner');
+        const owner = this._getAddr(lockId, F_OWNER);
+        if (!Blockchain.tx.sender.equals(owner)) throw new Revert('not owner');
 
-        const token  = new StoredAddress(sk(K_TOK, id), Address.dead()).value;
-        const amount = new StoredU256   (sk(K_AMT, id), u256.Zero    ).value;
-        const owner  = ownerStore.value;
+        const token  = this._getAddr(lockId, F_TOKEN);
+        const amount = this._getField(lockId, F_AMT);
 
-        doneFlag.value = true;
-        const tot = new StoredU256(sk(K_TOTAL, token.toString()), u256.Zero);
-        tot.value = tot.value - amount;
+        // CEI: effects before interaction
+        this._setBool(lockId, F_DONE, true);
+        const tKey = addrToU256(token);
+        this._totalLocked.set(tKey, SafeMath.sub(this._totalLocked.get(tKey), amount));
 
-        this._push(token, owner, amount);
+        TransferHelper.transfer(token, owner, amount);
 
-        const ev = new BytesWriter(96);
-        ev.writeU64(lockId); ev.writeAddress(owner); ev.writeAddress(token);
-        ev.writeU256(amount); ev.writeU64(Blockchain.block.number); ev.writeBoolean(false);
-        Blockchain.emit('LockReleased', ev);
-
+        this.emitEvent(new LockReleasedEvent(lockId, owner, token, amount));
         this._exit();
-        const w = new BytesWriter(1);
-        w.writeBoolean(true);
-        return w;
+
+        const w = new BytesWriter(1); w.writeBoolean(true); return w;
     }
 
-    private _unlockPartial(calldata: Calldata): BytesWriter {
-        this._requireActive();
-        this._enter();
+    @method(
+        { name: 'lockId',  type: ABIDataTypes.UINT64  },
+        { name: 'partial', type: ABIDataTypes.UINT256 },
+    )
+    @returns({ name: 'success', type: ABIDataTypes.BOOL })
+    public unlockPartial(calldata: Calldata): BytesWriter {
+        this._requireActive(); this._enter();
 
         const lockId  = calldata.readU64();
         const partial = calldata.readU256();
-        const id      = lockId.toString();
 
-        if (new StoredBoolean(sk(K_PERM, id), false).value) revert('permanent lock');
-        if (new StoredBoolean(sk(K_DONE, id), false).value) revert('already released');
-        if (partial == u256.Zero) revert('zero partial');
+        if (this._getBool(lockId, F_PERM)) throw new Revert('permanent lock');
+        if (this._getBool(lockId, F_DONE)) throw new Revert('already released');
+        if (partial.isZero()) throw new Revert('zero partial');
 
-        const unlockBlock = new StoredU64(sk(K_BLK, id), 0 as u64).value;
-        if (unlockBlock == (0 as u64)) revert('lock not found');
-        if (Blockchain.block.number < unlockBlock)
-            revert('locked until block ' + unlockBlock.toString());
+        const unlockBlock = this._getU64(lockId, F_BLK);
+        if (unlockBlock == 0) throw new Revert('lock not found');
+        if (Blockchain.block.number < unlockBlock) throw new Revert('still locked');
 
-        const ownerStore = new StoredAddress(sk(K_OWN, id), Address.dead());
-        if (!ownerStore.value.equals(Blockchain.tx.sender)) revert('not lock owner');
+        const owner = this._getAddr(lockId, F_OWNER);
+        if (!Blockchain.tx.sender.equals(owner)) throw new Revert('not owner');
 
-        const amtStore = new StoredU256(sk(K_AMT, id), u256.Zero);
-        if (partial >= amtStore.value) revert('partial >= total; use unlock()');
+        const current = this._getField(lockId, F_AMT);
+        if (partial >= current) throw new Revert('use unlock() for full release');
 
-        const token = new StoredAddress(sk(K_TOK, id), Address.dead()).value;
-        const owner = ownerStore.value;
+        const token = this._getAddr(lockId, F_TOKEN);
 
-        amtStore.value = amtStore.value - partial;
-        const tot = new StoredU256(sk(K_TOTAL, token.toString()), u256.Zero);
-        tot.value = tot.value - partial;
+        // CEI
+        this._setField(lockId, F_AMT, SafeMath.sub(current, partial));
+        const tKey = addrToU256(token);
+        this._totalLocked.set(tKey, SafeMath.sub(this._totalLocked.get(tKey), partial));
 
-        this._push(token, owner, partial);
-
-        const ev = new BytesWriter(112);
-        ev.writeU64(lockId); ev.writeAddress(owner); ev.writeAddress(token);
-        ev.writeU256(partial); ev.writeU256(amtStore.value); ev.writeU64(Blockchain.block.number);
-        Blockchain.emit('LockPartialRelease', ev);
+        TransferHelper.transfer(token, owner, partial);
 
         this._exit();
-        const w = new BytesWriter(1);
-        w.writeBoolean(true);
-        return w;
+        const w = new BytesWriter(1); w.writeBoolean(true); return w;
     }
 
-    private _splitLock(calldata: Calldata): BytesWriter {
-        this._requireActive();
-        this._enter();
+    @method(
+        { name: 'lockId',      type: ABIDataTypes.UINT64  },
+        { name: 'splitAmount', type: ABIDataTypes.UINT256 },
+    )
+    @returns({ name: 'childLockId', type: ABIDataTypes.UINT64 })
+    public splitLock(calldata: Calldata): BytesWriter {
+        this._requireActive(); this._enter();
 
         const lockId      = calldata.readU64();
         const splitAmount = calldata.readU256();
-        const id          = lockId.toString();
 
-        if (new StoredBoolean(sk(K_PERM, id), false).value) revert('cannot split permanent lock');
-        if (new StoredBoolean(sk(K_DONE, id), false).value) revert('lock already released');
-        if (splitAmount == u256.Zero) revert('zero split amount');
+        if (this._getBool(lockId, F_PERM)) throw new Revert('cannot split permanent');
+        if (this._getBool(lockId, F_DONE)) throw new Revert('already released');
+        if (splitAmount.isZero()) throw new Revert('zero split');
 
-        const ownerStore = new StoredAddress(sk(K_OWN, id), Address.dead());
-        if (!ownerStore.value.equals(Blockchain.tx.sender)) revert('not lock owner');
+        const owner = this._getAddr(lockId, F_OWNER);
+        if (!Blockchain.tx.sender.equals(owner)) throw new Revert('not owner');
 
-        const amtStore = new StoredU256(sk(K_AMT, id), u256.Zero);
-        if (splitAmount >= amtStore.value) revert('split >= total');
+        const current = this._getField(lockId, F_AMT);
+        if (splitAmount >= current) throw new Revert('split >= total');
 
-        const token       = new StoredAddress(sk(K_TOK,    id), Address.dead()).value;
-        const unlockBlock = new StoredU64    (sk(K_BLK,    id), 0 as u64    ).value;
-        const label       = new StoredString (sk(K_LBL,    id), ''          ).value;
-        const tag         = new StoredString (sk(K_TAG,    id), ''          ).value;
-        const owner       = ownerStore.value;
+        const token       = this._getAddr(lockId, F_TOKEN);
+        const unlockBlock = this._getU64(lockId, F_BLK);
 
-        amtStore.value = amtStore.value - splitAmount;
+        const remaining = SafeMath.sub(current, splitAmount);
+        this._setField(lockId, F_AMT, remaining);
+        this._setU64(lockId, F_SPLITS, this._getU64(lockId, F_SPLITS) + 1);
 
-        const splitsStore = new StoredU64(sk(K_SPLITS, id), 0 as u64);
-        splitsStore.value = splitsStore.value + (1 as u64);
+        const childId = this._nextId();
+        this._store(childId, token, owner, splitAmount, unlockBlock, false, lockId);
+        // No token transfer needed — tokens already held by this contract
 
-        const childId    = this._nextId();
-        const childLabel = label + ' [SPLIT]';
-        this._store(childId, token, owner, splitAmount, unlockBlock, false, childLabel, tag, lockId);
-
-        const evSplit = new BytesWriter(64);
-        evSplit.writeU64(lockId); evSplit.writeU64(childId);
-        evSplit.writeU256(splitAmount); evSplit.writeU256(amtStore.value);
-        Blockchain.emit('LockSplit', evSplit);
-
-        const evCreate = new BytesWriter(160);
-        evCreate.writeU64(childId); evCreate.writeAddress(owner); evCreate.writeAddress(token);
-        evCreate.writeU256(splitAmount); evCreate.writeBoolean(false); evCreate.writeU64(unlockBlock);
-        evCreate.writeU64(Blockchain.block.number);
-        evCreate.writeStringWithLength(childLabel); evCreate.writeStringWithLength(tag);
-        Blockchain.emit('LockCreated', evCreate);
-
+        this.emitEvent(new LockSplitEvent(lockId, childId, splitAmount, remaining));
         this._exit();
-        const w = new BytesWriter(8);
-        w.writeU64(childId);
-        return w;
+
+        const w = new BytesWriter(8); w.writeU64(childId); return w;
     }
 
-    private _batchLockTimed(calldata: Calldata): BytesWriter {
-        this._requireActive();
-        this._enter();
-        this._collectFee();
+    @method(
+        { name: 'count',        type: ABIDataTypes.UINT32    },
+        { name: 'tokens',       type: ABIDataTypes.ADDRESS   },
+        { name: 'amounts',      type: ABIDataTypes.UINT256   },
+        { name: 'unlockBlocks', type: ABIDataTypes.UINT64    },
+        { name: 'labels',       type: ABIDataTypes.STRING    },
+    )
+    @returns({ name: 'lockIds', type: ABIDataTypes.UINT64 })
+    public batchLockTimed(calldata: Calldata): BytesWriter {
+        this._requireActive(); this._enter(); this._collectFee();
 
         const count = calldata.readU32();
-        if (count == 0)          revert('empty batch');
-        if (count > MAX_BATCH)   revert('batch exceeds max');
+        if (count == 0) throw new Revert('empty batch');
+        if (count > MAX_BATCH) throw new Revert('batch too large');
 
-        const caller = Blockchain.tx.sender;
+        const caller  = Blockchain.tx.sender;
+        const tokens  = new Array<Address>(count as i32);
+        const amounts = new Array<u256>(count as i32);
+        const blocks  = new Array<u64>(count as i32);
+        const labels  = new Array<string>(count as i32);
 
-        const tokens : Address[] = new Array<Address>(count as i32);
-        const amounts: u256[]    = new Array<u256>   (count as i32);
-        const blocks : u64[]     = new Array<u64>    (count as i32);
-        const labels : string[]  = new Array<string> (count as i32);
+        for (let i: i32 = 0; i < (count as i32); i++) tokens[i]  = calldata.readAddress();
+        for (let i: i32 = 0; i < (count as i32); i++) amounts[i] = calldata.readU256();
+        for (let i: i32 = 0; i < (count as i32); i++) blocks[i]  = calldata.readU64();
+        for (let i: i32 = 0; i < (count as i32); i++) labels[i]  = calldata.readStringWithLength();
 
-        for (let i: i32 = 0; i < count as i32; i++) tokens[i]  = calldata.readAddress();
-        for (let i: i32 = 0; i < count as i32; i++) amounts[i] = calldata.readU256();
-        for (let i: i32 = 0; i < count as i32; i++) blocks[i]  = calldata.readU64();
-        for (let i: i32 = 0; i < count as i32; i++) labels[i]  = calldata.readStringWithLength();
-
-        for (let i: i32 = 0; i < count as i32; i++) {
-            if (amounts[i] == u256.Zero) revert('zero amount at index ' + i.toString());
+        // Validate all before any state change
+        for (let i: i32 = 0; i < (count as i32); i++) {
+            if (amounts[i].isZero()) throw new Revert('zero amount in batch');
             if (blocks[i] <= Blockchain.block.number + MIN_LOCK_BLOCKS)
-                revert('unlockBlock too soon at index ' + i.toString());
+                throw new Revert('unlockBlock too soon in batch');
         }
 
-        const lockIds: u64[] = new Array<u64>(count as i32);
-
-        for (let i: i32 = 0; i < count as i32; i++) {
-            this._pull(tokens[i], caller, amounts[i]);
+        const lockIds = new Array<u64>(count as i32);
+        for (let i: i32 = 0; i < (count as i32); i++) {
+            TransferHelper.transferFrom(tokens[i], caller, this.address, amounts[i]);
             const lockId = this._nextId();
-            this._store(lockId, tokens[i], caller, amounts[i], blocks[i], false, labels[i], 'batch', 0 as u64);
+            this._store(lockId, tokens[i], caller, amounts[i], blocks[i], false, 0);
             lockIds[i] = lockId;
-
-            const ev = new BytesWriter(144);
-            ev.writeU64(lockId); ev.writeAddress(caller); ev.writeAddress(tokens[i]);
-            ev.writeU256(amounts[i]); ev.writeBoolean(false); ev.writeU64(blocks[i]);
-            ev.writeU64(Blockchain.block.number);
-            ev.writeStringWithLength(labels[i]); ev.writeStringWithLength('batch');
-            Blockchain.emit('LockCreated', ev);
+            this.emitEvent(new LockCreatedEvent(lockId, caller, tokens[i], amounts[i], false, blocks[i]));
         }
-
-        const evBatch = new BytesWriter(48);
-        evBatch.writeAddress(caller); evBatch.writeU32(count);
-        evBatch.writeU64(lockIds[0]); evBatch.writeU64(lockIds[count as i32 - 1]);
-        Blockchain.emit('BatchLockCreated', evBatch);
 
         this._exit();
         const w = new BytesWriter(4 + (count as i32) * 8);
         w.writeU32(count);
-        for (let i: i32 = 0; i < count as i32; i++) w.writeU64(lockIds[i]);
+        for (let i: i32 = 0; i < (count as i32); i++) w.writeU64(lockIds[i]);
         return w;
     }
 
-    private _extendLock(calldata: Calldata): BytesWriter {
+    @method(
+        { name: 'lockId',        type: ABIDataTypes.UINT64 },
+        { name: 'newUnlockBlock',type: ABIDataTypes.UINT64 },
+    )
+    @returns({ name: 'success', type: ABIDataTypes.BOOL })
+    public extendLock(calldata: Calldata): BytesWriter {
         this._requireActive();
 
-        const lockId         = calldata.readU64();
-        const newUnlockBlock = calldata.readU64();
-        const id             = lockId.toString();
+        const lockId   = calldata.readU64();
+        const newBlock = calldata.readU64();
 
-        if (new StoredBoolean(sk(K_PERM, id), false).value) revert('cannot extend permanent lock');
-        if (new StoredBoolean(sk(K_DONE, id), false).value) revert('already released');
-        if (!new StoredAddress(sk(K_OWN, id), Address.dead()).value.equals(Blockchain.tx.sender))
-            revert('not lock owner');
+        if (this._getBool(lockId, F_PERM)) throw new Revert('permanent lock');
+        if (this._getBool(lockId, F_DONE)) throw new Revert('already released');
+        if (!Blockchain.tx.sender.equals(this._getAddr(lockId, F_OWNER)))
+            throw new Revert('not owner');
 
-        const blkStore = new StoredU64(sk(K_BLK, id), 0 as u64);
-        if (newUnlockBlock <= blkStore.value) revert('new block must be later');
+        if (newBlock <= this._getU64(lockId, F_BLK)) throw new Revert('must be later');
 
-        const oldBlock = blkStore.value;
-        blkStore.value = newUnlockBlock;
-        new StoredBoolean(sk(K_EXT, id), false).value = true;
+        this._setU64(lockId, F_BLK, newBlock);
+        this._setBool(lockId, F_EXT, true);
 
-        const ev = new BytesWriter(40);
-        ev.writeU64(lockId); ev.writeU64(oldBlock);
-        ev.writeU64(newUnlockBlock); ev.writeU64(Blockchain.block.number);
-        Blockchain.emit('LockExtended', ev);
-
-        const w = new BytesWriter(1);
-        w.writeBoolean(true);
-        return w;
+        this.emitEvent(new LockExtendedEvent(lockId, newBlock));
+        const w = new BytesWriter(1); w.writeBoolean(true); return w;
     }
 
-    private _transferOwnership(calldata: Calldata): BytesWriter {
+    @method(
+        { name: 'lockId',   type: ABIDataTypes.UINT64  },
+        { name: 'newOwner', type: ABIDataTypes.ADDRESS },
+    )
+    @returns({ name: 'success', type: ABIDataTypes.BOOL })
+    public transferLockOwnership(calldata: Calldata): BytesWriter {
         this._requireActive();
 
         const lockId   = calldata.readU64();
         const newOwner = calldata.readAddress();
-        const id       = lockId.toString();
 
-        if (new StoredBoolean(sk(K_PERM, id), false).value) revert('permanent lock');
-        if (new StoredBoolean(sk(K_DONE, id), false).value) revert('already released');
+        if (this._getBool(lockId, F_PERM)) throw new Revert('permanent lock');
+        if (this._getBool(lockId, F_DONE)) throw new Revert('already released');
 
-        const ownerStore = new StoredAddress(sk(K_OWN, id), Address.dead());
-        if (!ownerStore.value.equals(Blockchain.tx.sender)) revert('not lock owner');
-        if (newOwner.equals(Address.dead())) revert('dead address');
+        const oldOwner = this._getAddr(lockId, F_OWNER);
+        if (!Blockchain.tx.sender.equals(oldOwner)) throw new Revert('not owner');
+        if (newOwner.equals(Address.zero())) throw new Revert('zero address');
 
-        const oldOwner   = ownerStore.value;
-        ownerStore.value = newOwner;
+        this._setAddr(lockId, F_OWNER, newOwner);
 
-        if (new StoredBoolean(K_NFTON, false).value)
-            new StoredAddress(sk(K_NFT_OWN, id), Address.dead()).value = newOwner;
+        // Add to new owner's index
+        const oKey = addrToU256(newOwner);
+        const oCnt = this._ownCnt.get(oKey);
+        this._ownIdx.set(compKey(oKey, oCnt), u256.fromU64(lockId));
+        this._ownCnt.set(oKey, SafeMath.add(oCnt, u256.One));
 
-        const nStr = newOwner.toString();
-        const nCnt = new StoredU64(sk(K_OCNT, nStr), 0 as u64);
-        new StoredU64(sk(K_OIDX, nStr + ':' + nCnt.value.toString()), 0 as u64).value = lockId;
-        nCnt.value = nCnt.value + (1 as u64);
+        this.emitEvent(new LockOwnershipTransferredEvent(lockId, oldOwner, newOwner));
+        const w = new BytesWriter(1); w.writeBoolean(true); return w;
+    }
 
-        const ev = new BytesWriter(80);
-        ev.writeU64(lockId); ev.writeAddress(oldOwner);
-        ev.writeAddress(newOwner); ev.writeU64(Blockchain.block.number);
-        Blockchain.emit('LockOwnershipTransferred', ev);
+    // ─── Admin ────────────────────────────────────────────────────────────────
 
+    @method({ name: 'factory', type: ABIDataTypes.ADDRESS })
+    @returns({ name: 'success', type: ABIDataTypes.BOOL })
+    public setFactory(calldata: Calldata): BytesWriter {
+        this._requireAdmin();
+        this._factory.value = calldata.readAddress();
+        const w = new BytesWriter(1); w.writeBoolean(true); return w;
+    }
+
+    @method({ name: 'paused', type: ABIDataTypes.BOOL })
+    @returns({ name: 'success', type: ABIDataTypes.BOOL })
+    public setPaused(calldata: Calldata): BytesWriter {
+        this._requireAdmin();
+        this._paused.value = calldata.readBoolean();
+        const w = new BytesWriter(1); w.writeBoolean(true); return w;
+    }
+
+    @method({ name: 'feeSats', type: ABIDataTypes.UINT64 })
+    @returns({ name: 'success', type: ABIDataTypes.BOOL })
+    public setFee(calldata: Calldata): BytesWriter {
+        this._requireAdmin();
+        this._fee.set(0, calldata.readU64());
+        const w = new BytesWriter(1); w.writeBoolean(true); return w;
+    }
+
+    @method({ name: 'treasury', type: ABIDataTypes.ADDRESS })
+    @returns({ name: 'success', type: ABIDataTypes.BOOL })
+    public setTreasury(calldata: Calldata): BytesWriter {
+        this._requireAdmin();
+        this._treasury.value = calldata.readAddress();
+        const w = new BytesWriter(1); w.writeBoolean(true); return w;
+    }
+
+    @method()
+    @returns({ name: 'feesCollected', type: ABIDataTypes.UINT256 })
+    public withdrawFees(_calldata: Calldata): BytesWriter {
+        this._requireAdmin();
+        const amount = this._feesCollected.value;
+        if (amount.isZero()) throw new Revert('no fees');
+        this._feesCollected.value = u256.Zero;
+        // Fees are tracked on-chain; BTC disbursement handled via treasury
+        const w = new BytesWriter(32); w.writeU256(amount); return w;
+    }
+
+    // =========================================================================
+    // ── View Methods ──────────────────────────────────────────────────────────
+    // =========================================================================
+
+    @method({ name: 'lockId', type: ABIDataTypes.UINT64 })
+    @returns(
+        { name: 'token',       type: ABIDataTypes.ADDRESS },
+        { name: 'owner',       type: ABIDataTypes.ADDRESS },
+        { name: 'amount',      type: ABIDataTypes.UINT256 },
+        { name: 'unlockBlock', type: ABIDataTypes.UINT64  },
+        { name: 'isPermanent', type: ABIDataTypes.BOOL    },
+        { name: 'isReleased',  type: ABIDataTypes.BOOL    },
+        { name: 'isExtended',  type: ABIDataTypes.BOOL    },
+    )
+    public getLock(calldata: Calldata): BytesWriter {
+        const lockId = calldata.readU64();
+        const w = new BytesWriter(32 + 32 + 32 + 8 + 1 + 1 + 1);
+        w.writeAddress(this._getAddr(lockId, F_TOKEN));
+        w.writeAddress(this._getAddr(lockId, F_OWNER));
+        w.writeU256(this._getField(lockId, F_AMT));
+        w.writeU64(this._getU64(lockId, F_BLK));
+        w.writeBoolean(this._getBool(lockId, F_PERM));
+        w.writeBoolean(this._getBool(lockId, F_DONE));
+        w.writeBoolean(this._getBool(lockId, F_EXT));
+        return w;
+    }
+
+    @method({ name: 'lockId', type: ABIDataTypes.UINT64 })
+    @returns(
+        { name: 'token',       type: ABIDataTypes.ADDRESS },
+        { name: 'owner',       type: ABIDataTypes.ADDRESS },
+        { name: 'amount',      type: ABIDataTypes.UINT256 },
+        { name: 'unlockBlock', type: ABIDataTypes.UINT64  },
+        { name: 'isPermanent', type: ABIDataTypes.BOOL    },
+        { name: 'isReleased',  type: ABIDataTypes.BOOL    },
+        { name: 'isExtended',  type: ABIDataTypes.BOOL    },
+        { name: 'parentId',    type: ABIDataTypes.UINT64  },
+        { name: 'splitCount',  type: ABIDataTypes.UINT64  },
+    )
+    public getLockV2(calldata: Calldata): BytesWriter {
+        const lockId = calldata.readU64();
+        const w = new BytesWriter(32 + 32 + 32 + 8 + 1 + 1 + 1 + 8 + 8);
+        w.writeAddress(this._getAddr(lockId, F_TOKEN));
+        w.writeAddress(this._getAddr(lockId, F_OWNER));
+        w.writeU256(this._getField(lockId, F_AMT));
+        w.writeU64(this._getU64(lockId, F_BLK));
+        w.writeBoolean(this._getBool(lockId, F_PERM));
+        w.writeBoolean(this._getBool(lockId, F_DONE));
+        w.writeBoolean(this._getBool(lockId, F_EXT));
+        w.writeU64(this._getU64(lockId, F_PARENT));
+        w.writeU64(this._getU64(lockId, F_SPLITS));
+        return w;
+    }
+
+    @method(
+        { name: 'token',  type: ABIDataTypes.ADDRESS },
+        { name: 'offset', type: ABIDataTypes.UINT32  },
+        { name: 'limit',  type: ABIDataTypes.UINT32  },
+    )
+    @returns({ name: 'lockIds', type: ABIDataTypes.UINT64 })
+    public getLocksForToken(calldata: Calldata): BytesWriter {
+        return this._page(
+            addrToU256(calldata.readAddress()),
+            this._tknCnt, this._tknIdx,
+            calldata.readU32(), calldata.readU32(),
+        );
+    }
+
+    @method(
+        { name: 'owner',  type: ABIDataTypes.ADDRESS },
+        { name: 'offset', type: ABIDataTypes.UINT32  },
+        { name: 'limit',  type: ABIDataTypes.UINT32  },
+    )
+    @returns({ name: 'lockIds', type: ABIDataTypes.UINT64 })
+    public getLocksForOwner(calldata: Calldata): BytesWriter {
+        return this._page(
+            addrToU256(calldata.readAddress()),
+            this._ownCnt, this._ownIdx,
+            calldata.readU32(), calldata.readU32(),
+        );
+    }
+
+    @method({ name: 'token', type: ABIDataTypes.ADDRESS })
+    @returns({ name: 'totalLocked', type: ABIDataTypes.UINT256 })
+    public getTotalLocked(calldata: Calldata): BytesWriter {
+        const w = new BytesWriter(32);
+        w.writeU256(this._totalLocked.get(addrToU256(calldata.readAddress())));
+        return w;
+    }
+
+    @method({ name: 'token', type: ABIDataTypes.ADDRESS })
+    @returns({ name: 'count', type: ABIDataTypes.UINT64 })
+    public getLockCount(calldata: Calldata): BytesWriter {
+        const w = new BytesWriter(8);
+        w.writeU64(this._tknCnt.get(addrToU256(calldata.readAddress())).lo1);
+        return w;
+    }
+
+    @method({ name: 'lockId', type: ABIDataTypes.UINT64 })
+    @returns({ name: 'isPermanent', type: ABIDataTypes.BOOL })
+    public isLockPermanent(calldata: Calldata): BytesWriter {
         const w = new BytesWriter(1);
-        w.writeBoolean(true);
+        w.writeBoolean(this._getBool(calldata.readU64(), F_PERM));
         return w;
     }
 
-    // ─── Admin Methods ────────────────────────────────────────────────────────
-
-    private _setFactory(calldata: Calldata): BytesWriter {
-        this._requireAdmin();
-        const factory = calldata.readAddress();
-        new StoredAddress(K_FACT, Address.dead()).value = factory;
-        const ev = new BytesWriter(40); ev.writeAddress(factory); ev.writeU64(Blockchain.block.number);
-        Blockchain.emit('FactoryUpdated', ev);
-        const w = new BytesWriter(1); w.writeBoolean(true); return w;
-    }
-
-    private _setPaused(calldata: Calldata): BytesWriter {
-        this._requireAdmin();
-        const paused = calldata.readBoolean();
-        new StoredBoolean(K_PAUSE, false).value = paused;
-        const ev = new BytesWriter(8); ev.writeU64(Blockchain.block.number);
-        Blockchain.emit(paused ? 'ContractPaused' : 'ContractUnpaused', ev);
-        const w = new BytesWriter(1); w.writeBoolean(true); return w;
-    }
-
-    private _setFee(calldata: Calldata): BytesWriter {
-        this._requireAdmin();
-        const fee = calldata.readU64();
-        new StoredU64(K_FEE, 0 as u64).value = fee;
-        const ev = new BytesWriter(16); ev.writeU64(fee); ev.writeU64(Blockchain.block.number);
-        Blockchain.emit('FeeUpdated', ev);
-        const w = new BytesWriter(1); w.writeBoolean(true); return w;
-    }
-
-    private _setTreasury(calldata: Calldata): BytesWriter {
-        this._requireAdmin();
-        const treasury = calldata.readAddress();
-        new StoredAddress(K_TREAS, Address.dead()).value = treasury;
-        const ev = new BytesWriter(40); ev.writeAddress(treasury); ev.writeU64(Blockchain.block.number);
-        Blockchain.emit('TreasuryUpdated', ev);
-        const w = new BytesWriter(1); w.writeBoolean(true); return w;
-    }
-
-    private _setNFTReceiptsEnabled(calldata: Calldata): BytesWriter {
-        this._requireAdmin();
-        const enabled = calldata.readBoolean();
-        new StoredBoolean(K_NFTON, false).value = enabled;
-        const ev = new BytesWriter(9); ev.writeBoolean(enabled); ev.writeU64(Blockchain.block.number);
-        Blockchain.emit('NFTReceiptsToggled', ev);
-        const w = new BytesWriter(1); w.writeBoolean(true); return w;
-    }
-
-    private _withdrawFees(_calldata: Calldata): BytesWriter {
-        this._requireAdmin();
-        const collected = new StoredU256(K_FEES, u256.Zero);
-        if (collected.value == u256.Zero) revert('no fees to withdraw');
-
-        const treasury = new StoredAddress(K_TREAS, Address.dead()).value;
-        if (treasury.equals(Address.dead())) revert('treasury not set');
-
-        const amount    = collected.value;
-        collected.value = u256.Zero;
-
-        Blockchain.transfer(treasury, amount);
-
-        const ev = new BytesWriter(64);
-        ev.writeAddress(treasury); ev.writeU256(amount); ev.writeU64(Blockchain.block.number);
-        Blockchain.emit('FeesWithdrawn', ev);
-
-        const w = new BytesWriter(1); w.writeBoolean(true); return w;
-    }
-
-    // ─── View Methods ─────────────────────────────────────────────────────────
-
-    private _getLock(calldata: Calldata): BytesWriter {
+    @method({ name: 'lockId', type: ABIDataTypes.UINT64 })
+    @returns({ name: 'isUnlockable', type: ABIDataTypes.BOOL })
+    public isUnlockable(calldata: Calldata): BytesWriter {
         const lockId = calldata.readU64();
-        const id     = lockId.toString();
-        const w = new BytesWriter(320);
-        w.writeAddress(new StoredAddress(sk(K_TOK,  id), Address.dead()).value);
-        w.writeAddress(new StoredAddress(sk(K_OWN,  id), Address.dead()).value);
-        w.writeU256   (new StoredU256   (sk(K_AMT,  id), u256.Zero    ).value);
-        w.writeU64    (new StoredU64    (sk(K_BLK,  id), 0 as u64    ).value);
-        w.writeBoolean(new StoredBoolean(sk(K_PERM, id), false        ).value);
-        w.writeBoolean(new StoredBoolean(sk(K_DONE, id), false        ).value);
-        w.writeBoolean(new StoredBoolean(sk(K_EXT,  id), false        ).value);
-        w.writeU64    (lockId);
-        w.writeStringWithLength(new StoredString(sk(K_LBL, id), '').value);
+        const perm   = this._getBool(lockId, F_PERM);
+        const done   = this._getBool(lockId, F_DONE);
+        const blk    = this._getU64(lockId, F_BLK);
+        const w = new BytesWriter(1);
+        w.writeBoolean(!perm && !done && blk > 0 && Blockchain.block.number >= blk);
         return w;
     }
 
-    private _getLockV2(calldata: Calldata): BytesWriter {
-        const lockId = calldata.readU64();
-        const id     = lockId.toString();
-        const w = new BytesWriter(400);
-        w.writeAddress(new StoredAddress(sk(K_TOK,    id), Address.dead()).value);
-        w.writeAddress(new StoredAddress(sk(K_OWN,    id), Address.dead()).value);
-        w.writeU256   (new StoredU256   (sk(K_AMT,    id), u256.Zero    ).value);
-        w.writeU64    (new StoredU64    (sk(K_BLK,    id), 0 as u64    ).value);
-        w.writeBoolean(new StoredBoolean(sk(K_PERM,   id), false        ).value);
-        w.writeBoolean(new StoredBoolean(sk(K_DONE,   id), false        ).value);
-        w.writeBoolean(new StoredBoolean(sk(K_EXT,    id), false        ).value);
-        w.writeU64    (lockId);
-        w.writeStringWithLength(new StoredString(sk(K_LBL,    id), '').value);
-        w.writeStringWithLength(new StoredString(sk(K_TAG,    id), '').value);
-        w.writeU64    (new StoredU64    (sk(K_NONCE,  id), 0 as u64    ).value);
-        w.writeU64    (new StoredU64    (sk(K_PARENT, id), 0 as u64    ).value);
-        w.writeU64    (new StoredU64    (sk(K_SPLITS, id), 0 as u64    ).value);
+    @method()
+    @returns({ name: 'version', type: ABIDataTypes.STRING })
+    public version(_: Calldata): BytesWriter {
+        const w = new BytesWriter(32);
+        w.writeStringWithLength('3.0.0-testnet');
         return w;
     }
 
-    private _getLocksForToken(calldata: Calldata): BytesWriter {
-        return this._page(K_TCNT, K_TIDX, calldata.readAddress().toString(), calldata.readU32(), calldata.readU32());
+    @method()
+    @returns({ name: 'paused', type: ABIDataTypes.BOOL })
+    public isPaused(_: Calldata): BytesWriter {
+        const w = new BytesWriter(1);
+        w.writeBoolean(this._paused.value);
+        return w;
     }
 
-    private _getLocksForOwner(calldata: Calldata): BytesWriter {
-        return this._page(K_OCNT, K_OIDX, calldata.readAddress().toString(), calldata.readU32(), calldata.readU32());
+    @method()
+    @returns({ name: 'fee', type: ABIDataTypes.UINT64 })
+    public getFee(_: Calldata): BytesWriter {
+        const w = new BytesWriter(8);
+        w.writeU64(this._fee.get(0));
+        return w;
     }
 
-    private _page(cntPfx: string, idxPfx: string, scope: string, off: u32, lim: u32): BytesWriter {
-        const total   = new StoredU64(sk(cntPfx, scope), 0 as u64).value;
+    @method()
+    @returns({ name: 'treasury', type: ABIDataTypes.ADDRESS })
+    public getTreasury(_: Calldata): BytesWriter {
+        const w = new BytesWriter(32);
+        w.writeAddress(this._treasury.value);
+        return w;
+    }
+
+    @method()
+    @returns({ name: 'feesCollected', type: ABIDataTypes.UINT256 })
+    public getFeesCollected(_: Calldata): BytesWriter {
+        const w = new BytesWriter(32);
+        w.writeU256(this._feesCollected.value);
+        return w;
+    }
+
+    // =========================================================================
+    // ── Private Helpers ───────────────────────────────────────────────────────
+    // =========================================================================
+
+    private _enter(): void {
+        if (this._reentrancy.value) throw new Revert('reentrancy');
+        this._reentrancy.value = true;
+    }
+
+    private _exit(): void {
+        this._reentrancy.value = false;
+    }
+
+    private _requireActive(): void {
+        if (this._paused.value) throw new Revert('paused');
+    }
+
+    private _requireAdmin(): void {
+        if (!Blockchain.tx.sender.equals(this._admin.value))
+            throw new Revert('admin only');
+    }
+
+    private _collectFee(): void {
+        const fee = this._fee.get(0);
+        if (fee == 0) return;
+        this._feesCollected.value = SafeMath.add(this._feesCollected.value, u256.fromU64(fee));
+    }
+
+    private _nextId(): u64 {
+        const n = this._lockCounter.get(0) + 1;
+        this._lockCounter.set(0, n);
+        return n;
+    }
+
+    private _store(
+        id: u64, token: Address, owner: Address,
+        amount: u256, blk: u64, perm: bool, parentId: u64,
+    ): void {
+        this._setField(id, F_AMT, amount);
+        this._setAddr(id, F_TOKEN, token);
+        this._setAddr(id, F_OWNER, owner);
+        this._setU64(id, F_BLK, blk);
+        this._setBool(id, F_PERM, perm);
+        this._setBool(id, F_DONE, false);
+        this._setBool(id, F_EXT, false);
+        this._setU64(id, F_SPLITS, 0);
+        this._setU64(id, F_PARENT, parentId);
+
+        // Token index
+        const tKey = addrToU256(token);
+        const tCnt = this._tknCnt.get(tKey);
+        this._tknIdx.set(compKey(tKey, tCnt), u256.fromU64(id));
+        this._tknCnt.set(tKey, SafeMath.add(tCnt, u256.One));
+
+        // Owner index
+        const oKey = addrToU256(owner);
+        const oCnt = this._ownCnt.get(oKey);
+        this._ownIdx.set(compKey(oKey, oCnt), u256.fromU64(id));
+        this._ownCnt.set(oKey, SafeMath.add(oCnt, u256.One));
+
+        // Total locked
+        this._totalLocked.set(tKey, SafeMath.add(this._totalLocked.get(tKey), amount));
+    }
+
+    // ── Field read/write shortcuts ────────────────────────────────────────────
+
+    private _getField(id: u64, field: u256): u256 {
+        return this._lockData.get(lockKey(id, field));
+    }
+
+    private _setField(id: u64, field: u256, val: u256): void {
+        this._lockData.set(lockKey(id, field), val);
+    }
+
+    private _getBool(id: u64, field: u256): bool {
+        return !this._getField(id, field).isZero();
+    }
+
+    private _setBool(id: u64, field: u256, val: bool): void {
+        this._setField(id, field, val ? u256.One : u256.Zero);
+    }
+
+    private _getU64(id: u64, field: u256): u64 {
+        return this._getField(id, field).lo1;
+    }
+
+    private _setU64(id: u64, field: u256, val: u64): void {
+        this._setField(id, field, u256.fromU64(val));
+    }
+
+    private _getAddr(id: u64, field: u256): Address {
+        return u256ToAddr(this._getField(id, field));
+    }
+
+    private _setAddr(id: u64, field: u256, addr: Address): void {
+        this._setField(id, field, addrToU256(addr));
+    }
+
+    // ── Paginated index reader ────────────────────────────────────────────────
+
+    private _page(
+        scopeKey: u256,
+        cntMap: StoredMapU256, idxMap: StoredMapU256,
+        off: u32, lim: u32,
+    ): BytesWriter {
+        const total   = cntMap.get(scopeKey).lo1;
         const safe    = lim > MAX_PAGE ? MAX_PAGE : lim;
         const start   = off as u64;
         const end     = start + (safe as u64);
         const realEnd = end > total ? total : end;
         const count   = realEnd > start ? (realEnd - start) as u32 : 0;
-        const w       = new BytesWriter(4 + (count as i32) * 8);
+        const w = new BytesWriter(4 + (count as i32) * 8);
         w.writeU32(count);
-        for (let i: u64 = start; i < realEnd; i++)
-            w.writeU64(new StoredU64(sk(idxPfx, scope + ':' + i.toString()), 0 as u64).value);
-        return w;
-    }
-
-    private _getTotalLocked(calldata: Calldata): BytesWriter {
-        const w = new BytesWriter(32);
-        w.writeU256(new StoredU256(sk(K_TOTAL, calldata.readAddress().toString()), u256.Zero).value);
-        return w;
-    }
-
-    private _getLockCount(calldata: Calldata): BytesWriter {
-        const w = new BytesWriter(8);
-        w.writeU64(new StoredU64(sk(K_TCNT, calldata.readAddress().toString()), 0 as u64).value);
-        return w;
-    }
-
-    private _isLockPermanent(calldata: Calldata): BytesWriter {
-        const w = new BytesWriter(1);
-        w.writeBoolean(new StoredBoolean(sk(K_PERM, calldata.readU64().toString()), false).value);
-        return w;
-    }
-
-    private _isUnlockable(calldata: Calldata): BytesWriter {
-        const lockId = calldata.readU64();
-        const id     = lockId.toString();
-        const perm   = new StoredBoolean(sk(K_PERM, id), false).value;
-        const done   = new StoredBoolean(sk(K_DONE, id), false).value;
-        const blk    = new StoredU64   (sk(K_BLK,  id), 0 as u64).value;
-        const w = new BytesWriter(1);
-        w.writeBoolean(!perm && !done && blk > (0 as u64) && Blockchain.block.number >= blk);
-        return w;
-    }
-
-    private _nftOwner(calldata: Calldata): BytesWriter {
-        const w = new BytesWriter(32);
-        w.writeAddress(new StoredAddress(sk(K_NFT_OWN, calldata.readU64().toString()), Address.dead()).value);
-        return w;
-    }
-
-    private _getFee(): BytesWriter {
-        const w = new BytesWriter(8);
-        w.writeU64(new StoredU64(K_FEE, 0 as u64).value);
-        return w;
-    }
-
-    private _getTreasury(): BytesWriter {
-        const w = new BytesWriter(32);
-        w.writeAddress(new StoredAddress(K_TREAS, Address.dead()).value);
-        return w;
-    }
-
-    private _getFeesCollected(): BytesWriter {
-        const w = new BytesWriter(32);
-        w.writeU256(new StoredU256(K_FEES, u256.Zero).value);
-        return w;
-    }
-
-    private _version(): BytesWriter {
-        const w = new BytesWriter(16);
-        w.writeStringWithLength('3.0.0-testnet');
-        return w;
-    }
-
-    private _isPaused(): BytesWriter {
-        const w = new BytesWriter(1);
-        w.writeBoolean(new StoredBoolean(K_PAUSE, false).value);
+        for (let i: u64 = start; i < realEnd; i++) {
+            w.writeU64(idxMap.get(compKey(scopeKey, u256.fromU64(i))).lo1);
+        }
         return w;
     }
 }
