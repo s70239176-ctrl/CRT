@@ -37,7 +37,7 @@ function LockCard({lock,onUnlock}:{lock:LockInfo;onUnlock:(id:bigint)=>void}) {
   );
 }
 
-function CreateForm({onSubmit}:{onSubmit:(d:any)=>void}) {
+function CreateForm({onSubmit,disabled}:{onSubmit:(d:any)=>void;disabled:boolean}) {
   const [token,setToken]=useState('');
   const [amount,setAmount]=useState('');
   const [block,setBlock]=useState('');
@@ -54,18 +54,21 @@ function CreateForm({onSubmit}:{onSubmit:(d:any)=>void}) {
       </div>
       {!perm && <label>Unlock Block<input className="input" type="number" placeholder="e.g. 850000" value={block} onChange={e=>setBlock(e.target.value)}/></label>}
       <label>Label (optional)<input className="input" placeholder="My LP lock" value={label} onChange={e=>setLabel(e.target.value)}/></label>
-      <button className="btn btn-primary" onClick={()=>onSubmit({token,amount,block,label,perm})}>Lock Tokens</button>
+      <button className="btn btn-primary" disabled={disabled} onClick={()=>onSubmit({token,amount,block,label,perm})}>
+        {disabled ? 'Sending…' : 'Lock Tokens'}
+      </button>
     </div>
   );
 }
 
 export default function App() {
-  const { openConnectModal, disconnect, walletAddress, connecting, network } = useWalletConnect();
-  const { getLocksForOwner, getVersion, getIsPaused, sendTransaction, buildLockTimed, buildLockPermanent, buildUnlock } = useLocker();
+  const { openConnectModal, disconnect, walletAddress, walletInstance, connecting, network } = useWalletConnect();
+  const { getLocksForOwner, getVersion, getIsPaused, buildLockTimed, buildLockPermanent, buildUnlock } = useLocker();
   const [locks,setLocks]=useState<LockInfo[]>([]);
   const [version,setVersion]=useState('');
   const [paused,setPaused]=useState(false);
   const [loading,setLoading]=useState(false);
+  const [sending,setSending]=useState(false);
   const [tab,setTab]=useState<'locks'|'create'>('locks');
   const [err,setErr]=useState('');
 
@@ -81,24 +84,42 @@ export default function App() {
 
   useEffect(()=>{ if(walletAddress) loadLocks(); },[walletAddress]);
 
-  const sendTx = async(calldata:Uint8Array)=>{
-    // @ts-ignore
-    await window.opnet?.sendTransaction({to:LOCKER_ADDRESS,data:calldata});
-    setTimeout(loadLocks,4000);
-  };
+  const sendTx = useCallback(async(calldata: Uint8Array) => {
+    if (!walletInstance || !walletAddress) throw new Error('Wallet not connected');
+    const web3 = walletInstance as any;
+    if (typeof web3.signAndBroadcastInteraction !== 'function') {
+      throw new Error('Wallet does not support signAndBroadcastInteraction. Update OP_WALLET.');
+    }
+    const [funding, interaction] = await web3.signAndBroadcastInteraction({
+      to: LOCKER_ADDRESS,
+      calldata,
+      feeRate: 10,
+      priorityFee: 1000n,
+    });
+    if (!funding?.success) throw new Error(`Funding failed: ${funding?.error ?? 'unknown'}`);
+    if (!interaction?.success) throw new Error(`Interaction failed: ${interaction?.error ?? 'unknown'}`);
+    return interaction.result as string;
+  }, [walletInstance, walletAddress]);
 
   const handleCreate = async(d:any)=>{
-    if(!d.token||!d.amount) return; setErr('');
+    if(!d.token||!d.amount) return; setErr(''); setSending(true);
     try {
       const amt = BigInt(Math.floor(parseFloat(d.amount)*1e18));
-      await sendTx(d.perm ? buildLockPermanent(d.token,amt,d.label||'lock') : buildLockTimed(d.token,amt,BigInt(d.block||0),d.label||'lock'));
+      const cd = d.perm
+        ? buildLockPermanent(d.token, amt, d.label||'lock')
+        : buildLockTimed(d.token, amt, BigInt(d.block||0), d.label||'lock');
+      await sendTx(cd);
+      setTimeout(loadLocks, 5000);
+      setTab('locks');
     } catch(e:any){ setErr(e?.message??'Transaction failed'); }
+    finally { setSending(false); }
   };
 
   const handleUnlock = async(lockId:bigint)=>{
-    setErr('');
-    try { await sendTx(buildUnlock(lockId)); }
+    setErr(''); setSending(true);
+    try { await sendTx(buildUnlock(lockId)); setTimeout(loadLocks, 5000); }
     catch(e:any){ setErr(e?.message??'Transaction failed'); }
+    finally { setSending(false); }
   };
 
   const isConnected = !!walletAddress;
@@ -112,7 +133,7 @@ export default function App() {
             <div className="brand-name">MotoSwap Locker</div>
             <div className="brand-badges">
               {version && <span className="badge">{version}</span>}
-              <span className="badge net">{NETWORK_NAME}</span>
+              <span className="badge net">{network?.network ?? NETWORK_NAME}</span>
               {paused && <span className="badge warn">PAUSED</span>}
             </div>
           </div>
@@ -162,7 +183,7 @@ export default function App() {
                     : <div className="grid">{locks.map(l=><LockCard key={l.lockId.toString()} lock={l} onUnlock={handleUnlock}/>)}</div>}
               </div>
             )}
-            {tab==='create' && <CreateForm onSubmit={handleCreate}/>}
+            {tab==='create' && <CreateForm onSubmit={handleCreate} disabled={sending}/>}
           </>
         )}
       </main>
