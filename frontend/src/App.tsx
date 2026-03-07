@@ -62,7 +62,7 @@ function CreateForm({onSubmit,disabled}:{onSubmit:(d:any)=>void;disabled:boolean
 }
 
 export default function App() {
-  const { openConnectModal, disconnect, walletAddress, walletInstance, connecting, network } = useWalletConnect();
+  const { openConnectModal, disconnect, walletAddress, connecting, network } = useWalletConnect();
   const { getLocksForOwner, getVersion, getIsPaused, buildLockTimed, buildLockPermanent, buildUnlock } = useLocker();
   const [locks,setLocks]=useState<LockInfo[]>([]);
   const [version,setVersion]=useState('');
@@ -85,21 +85,28 @@ export default function App() {
   useEffect(()=>{ if(walletAddress) loadLocks(); },[walletAddress]);
 
   const sendTx = useCallback(async(calldata: Uint8Array) => {
-    if (!walletInstance || !walletAddress) throw new Error('Wallet not connected');
-    const web3 = walletInstance as any;
+    // window.opnet is the OP_WALLET extension
+    // window.opnet.web3 is the Web3Provider with signAndBroadcastInteraction
+    const opnet = (window as any).opnet;
+    if (!opnet) throw new Error('OP_WALLET extension not found');
+    
+    const web3 = opnet.web3;
+    if (!web3) throw new Error('OP_WALLET web3 provider not found');
     if (typeof web3.signAndBroadcastInteraction !== 'function') {
-      throw new Error('Wallet does not support signAndBroadcastInteraction. Update OP_WALLET.');
+      throw new Error('signAndBroadcastInteraction not available — update OP_WALLET');
     }
+
     const [funding, interaction] = await web3.signAndBroadcastInteraction({
       to: LOCKER_ADDRESS,
       calldata,
       feeRate: 10,
       priorityFee: 1000n,
     });
-    if (!funding?.success) throw new Error(`Funding failed: ${funding?.error ?? 'unknown'}`);
-    if (!interaction?.success) throw new Error(`Interaction failed: ${interaction?.error ?? 'unknown'}`);
+
+    if (!funding?.success) throw new Error(`Funding tx failed: ${funding?.error ?? 'unknown'}`);
+    if (!interaction?.success) throw new Error(`Interaction tx failed: ${interaction?.error ?? 'unknown'}`);
     return interaction.result as string;
-  }, [walletInstance, walletAddress]);
+  }, []);
 
   const handleCreate = async(d:any)=>{
     if(!d.token||!d.amount) return; setErr(''); setSending(true);
