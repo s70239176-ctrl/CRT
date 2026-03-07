@@ -2,6 +2,7 @@ import { useCallback, useRef } from 'react';
 import { JSONRpcProvider } from 'opnet';
 import { networks } from '@btc-vision/bitcoin';
 import { BinaryWriter, Address } from '@btc-vision/transaction';
+import { useWalletConnect } from '@btc-vision/walletconnect';
 import { LOCKER_ADDRESS, NETWORK_NAME, RPC_URL, SELECTORS } from '../config';
 
 export interface LockInfo {
@@ -29,7 +30,10 @@ function decodeLock(raw: Uint8Array, lockId: bigint): LockInfo | null {
   try {
     const v = new DataView(raw.buffer, raw.byteOffset);
     let o = 0;
-    const h = (n: number) => { const s = '0x'+Array.from(raw.slice(o,o+n)).map(b=>b.toString(16).padStart(2,'0')).join(''); o+=n; return s; };
+    const h = (n: number) => {
+      const s = '0x' + Array.from(raw.slice(o, o + n)).map(b => b.toString(16).padStart(2, '0')).join('');
+      o += n; return s;
+    };
     const token = h(32); const owner = h(32);
     let amount = 0n;
     for (let i = 0; i < 32; i++) amount = (amount << 8n) | BigInt(raw[o + i]);
@@ -54,6 +58,7 @@ function decodeLockIds(raw: Uint8Array): bigint[] {
 
 export function useLocker() {
   const provider = useRef(getProvider()).current;
+  const { walletInstance, walletAddress, provider: walletProvider } = useWalletConnect();
 
   const call = useCallback(async (calldata: Uint8Array, from?: string) => {
     const res = await provider.call(LOCKER_ADDRESS, calldata, from ?? LOCKER_ADDRESS);
@@ -85,6 +90,36 @@ export function useLocker() {
   const getIsPaused = useCallback(async () =>
     (await call(sel(SELECTORS.isPaused)))[0] !== 0, [call]);
 
+  const sendTransaction = useCallback(async (calldata: Uint8Array) => {
+    if (!walletInstance || !walletAddress) throw new Error('Wallet not connected');
+
+    // Get gas params for feeRate
+    const gasParams = await provider.gasParameters();
+    const feeRate = gasParams?.feeRate ?? 10;
+
+    // Get UTXOs for the sender
+    const utxos = await provider.getUTXOs(walletAddress);
+    if (!utxos || utxos.length === 0) throw new Error('No UTXOs found. Fund your wallet first.');
+
+    // Use Web3Provider (wallet extension) to sign + broadcast
+    const web3 = walletInstance as any;
+    if (typeof web3.signAndBroadcastInteraction !== 'function') {
+      throw new Error('Wallet does not support signAndBroadcastInteraction');
+    }
+
+    const [fundingTx, interactionTx] = await web3.signAndBroadcastInteraction({
+      to: LOCKER_ADDRESS,
+      calldata,
+      utxos,
+      feeRate,
+      priorityFee: 1000n,
+    });
+
+    if (!fundingTx.success) throw new Error(`Funding tx failed: ${fundingTx.error}`);
+    if (!interactionTx.success) throw new Error(`Interaction tx failed: ${interactionTx.error}`);
+    return interactionTx.result as string;
+  }, [walletInstance, walletAddress, provider]);
+
   const buildLockTimed = (token: string, amount: bigint, unlockBlock: bigint, label: string) => {
     const w = new BinaryWriter();
     w.writeU32(SELECTORS.lockTimed); w.writeAddress(Address.fromString(token));
@@ -101,9 +136,10 @@ export function useLocker() {
   };
 
   const buildUnlock = (lockId: bigint) => {
-    const w = new BinaryWriter(); w.writeU32(SELECTORS.unlock); w.writeU64(lockId);
+    const w = new BinaryWriter();
+    w.writeU32(SELECTORS.unlock); w.writeU64(lockId);
     return w.getBuffer();
   };
 
-  return { getLock, getLocksForOwner, getVersion, getIsPaused, buildLockTimed, buildLockPermanent, buildUnlock };
+  return { getLock, getLocksForOwner, getVersion, getIsPaused, sendTransaction, buildLockTimed, buildLockPermanent, buildUnlock };
 }

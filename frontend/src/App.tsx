@@ -61,7 +61,7 @@ function CreateForm({onSubmit}:{onSubmit:(d:any)=>void}) {
 
 export default function App() {
   const { openConnectModal, disconnect, walletAddress, connecting, network } = useWalletConnect();
-  const { getLocksForOwner, getVersion, getIsPaused, buildLockTimed, buildLockPermanent, buildUnlock } = useLocker();
+  const { getLocksForOwner, getVersion, getIsPaused, sendTransaction, buildLockTimed, buildLockPermanent, buildUnlock } = useLocker();
   const [locks,setLocks]=useState<LockInfo[]>([]);
   const [version,setVersion]=useState('');
   const [paused,setPaused]=useState(false);
